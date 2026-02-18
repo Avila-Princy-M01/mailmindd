@@ -627,7 +627,13 @@ export default function Home() {
 
   // ✅ AI: Batch generate all AI data for visible emails
   async function generateAllAIData(emails: Email[]) {
-    const emailsNeedingAI = emails.slice(0, 20); // Process first 20 emails
+    // ✅ FIX: Filter out emails that already have ALL AI data
+    const emailsNeedingAI = emails.filter(mail => 
+      !aiPriorityMap[mail.id] || 
+      !aiCategoryMap[mail.id] || 
+      !aiSpamMap[mail.id] || 
+      !aiDeadlineMap[mail.id]
+    ).slice(0, 20); // Process max 20 emails
     
     if (emailsNeedingAI.length === 0) return;
     
@@ -915,10 +921,20 @@ export default function Home() {
         return true;
       });
       
-      // Generate AI data for first 20 visible emails
-      generateAllAIData(displayEmails.slice(0, 20));
+      // ✅ FIX: Only process emails that don't have AI data yet
+      const emailsNeedingAI = displayEmails.slice(0, 20).filter(mail => 
+        !aiPriorityMap[mail.id] || 
+        !aiCategoryMap[mail.id] || 
+        !aiSpamMap[mail.id] || 
+        !aiDeadlineMap[mail.id]
+      );
+      
+      // Only generate if there are emails needing AI data
+      if (emailsNeedingAI.length > 0) {
+        generateAllAIData(emailsNeedingAI);
+      }
     }
-  }, [emails.length, activeTab, activeFolder, starredIds.length, snoozedIds.length]);
+  }, [emails.length]); // ✅ FIX: Only run when emails.length changes (i.e., new emails loaded)
 
   // ✅ NEW: Auto-generate AI titles for archived emails without titles
   useEffect(() => {
