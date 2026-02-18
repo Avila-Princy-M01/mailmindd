@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 function makeEmail(to: string, subject: string, message: string) {
     const emailLines = [
         `To: ${to}`,
-        `Subject: Re: ${subject}`,
+        `Subject: ${subject}`,
         "Content-Type: text/plain; charset=utf-8",
         "",
         message,

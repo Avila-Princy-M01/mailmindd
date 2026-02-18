@@ -39,6 +39,12 @@ export default function Home() {
   const [showCompose, setShowCompose] = useState(false);
   const [showGemini, setShowGemini] = useState(false);
 
+  // ✅ NEW: Compose email state
+  const [composeTo, setComposeTo] = useState("");
+  const [composeSubject, setComposeSubject] = useState("");
+  const [composeBody, setComposeBody] = useState("");
+  const [sendingEmail, setSendingEmail] = useState(false);
+
 
 
 
@@ -132,6 +138,12 @@ export default function Home() {
   
   // ✅ To-Do List State
   const [showTodoView, setShowTodoView] = useState(false);
+  
+  // ✅ Weekly Analysis State
+  const [showWeeklyAnalysis, setShowWeeklyAnalysis] = useState(false);
+  
+  // ✅ Focus Mode State
+  const [showFocusMode, setShowFocusMode] = useState(false);
 
   // 🔍 Search Query
   const [searchQuery, setSearchQuery] = useState("");
@@ -167,6 +179,46 @@ export default function Home() {
   }
 
 
+
+  // ✅ NEW: Send composed email
+  async function sendComposedEmail() {
+    if (!composeTo || !composeSubject || !composeBody) {
+      alert("❌ Please fill in all fields (To, Subject, Body)");
+      return;
+    }
+
+    setSendingEmail(true);
+
+    try {
+      const res = await fetch("/api/gmail/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: composeTo,
+          subject: composeSubject,
+          body: composeBody,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        alert("✅ Email sent successfully!");
+        // Clear form
+        setComposeTo("");
+        setComposeSubject("");
+        setComposeBody("");
+        setShowCompose(false);
+      } else {
+        alert("❌ Error: " + (data.error || "Failed to send email"));
+      }
+    } catch (error) {
+      console.error("Send email error:", error);
+      alert("❌ Failed to send email. Check console for details.");
+    }
+
+    setSendingEmail(false);
+  }
 
   // ⏳ Snooze Email (hide from inbox)
   function snoozeMail() {
@@ -960,6 +1012,218 @@ export default function Home() {
       workloadTrend,
       recommendation,
     };
+  }
+
+  // ✅ NEW: Get weekly analysis
+  function getWeeklyAnalysis() {
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    // Filter emails from last 7 days
+    const weekEmails = emails.filter((mail) => {
+      const mailDate = new Date(mail.date);
+      return mailDate >= weekAgo && mailDate <= now;
+    });
+
+    // Calculate stress metrics
+    let stressScore = 0;
+    let urgentCount = 0;
+    let lateNightCount = 0;
+    let highPriorityCount = 0;
+
+    weekEmails.forEach((mail) => {
+      const text = (mail.subject || "").toLowerCase() + " " + (mail.snippet || "").toLowerCase();
+      const priority = getPriorityScore(mail);
+
+      // Urgent emails
+      if (text.includes("urgent") || text.includes("asap") || text.includes("immediately") || text.includes("deadline")) {
+        urgentCount++;
+        stressScore += 15;
+      }
+
+      // High priority
+      if (priority > 70) {
+        highPriorityCount++;
+        stressScore += 10;
+      }
+
+      // Late night emails
+      if (mail.date) {
+        const hour = new Date(mail.date).getHours();
+        if (hour >= 22 || hour <= 6) {
+          lateNightCount++;
+          stressScore += 12;
+        }
+      }
+    });
+
+    // Cap stress score
+    stressScore = Math.min(stressScore, 100);
+
+    // Tasks completed (from archive)
+    const weekCompleted = archivedEmails.filter((mail) => {
+      if (!mail.completedAt) return false;
+      const completedDate = new Date(mail.completedAt);
+      return completedDate >= weekAgo && completedDate <= now;
+    });
+
+    // Productivity score (completed vs received)
+    const productivityRate = weekEmails.length > 0 
+      ? Math.round((weekCompleted.length / weekEmails.length) * 100)
+      : 0;
+
+    // Stress level
+    let stressLevel = "😌 Low";
+    let stressColor = "#10B981";
+    if (stressScore > 70) {
+      stressLevel = "🔥 High";
+      stressColor = "#EF4444";
+    } else if (stressScore > 40) {
+      stressLevel = "⚠️ Medium";
+      stressColor = "#F59E0B";
+    }
+
+    // Burnout risk
+    let burnoutRisk = "Low Risk";
+    let burnoutColor = "#10B981";
+    if (lateNightCount > 10 || urgentCount > 15) {
+      burnoutRisk = "High Risk";
+      burnoutColor = "#EF4444";
+    } else if (lateNightCount > 5 || urgentCount > 8) {
+      burnoutRisk = "Medium Risk";
+      burnoutColor = "#F59E0B";
+    }
+
+    // Recommendations
+    let recommendations = [];
+    if (stressScore > 70) {
+      recommendations.push("Take breaks between emails");
+      recommendations.push("Delegate low-priority tasks");
+    }
+    if (lateNightCount > 5) {
+      recommendations.push("Set email boundaries after 9 PM");
+    }
+    if (productivityRate < 30) {
+      recommendations.push("Focus on completing pending tasks");
+    }
+    if (recommendations.length === 0) {
+      recommendations.push("Great work! Keep it up 🎉");
+    }
+
+    return {
+      weekEmails: weekEmails.length,
+      tasksCompleted: weekCompleted.length,
+      urgentCount,
+      highPriorityCount,
+      lateNightCount,
+      stressScore,
+      stressLevel,
+      stressColor,
+      burnoutRisk,
+      burnoutColor,
+      productivityRate,
+      recommendations,
+    };
+  }
+
+  // ✅ NEW: Get today's urgent tasks for Focus Mode
+  function getTodaysTasks() {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+
+    // Filter actionable emails
+    const actionableEmails = emails.filter((mail) => {
+      // Skip snoozed and done
+      if (snoozedIds.includes(mail.id) || doneIds.includes(mail.id)) return false;
+      
+      // Must be actionable
+      if (!isActionableEmail(mail)) return false;
+      
+      // ✅ Skip reply emails (Re:, Fwd:, etc.)
+      const subject = (mail.subject || "").toLowerCase();
+      if (subject.startsWith("re:") || subject.startsWith("fwd:") || subject.startsWith("fw:")) {
+        return false;
+      }
+      
+      return true;
+    });
+
+    // Filter for today's tasks ONLY
+    const todaysTasks = actionableEmails.filter((mail) => {
+      const text = (mail.subject || "").toLowerCase() + " " + (mail.snippet || "").toLowerCase();
+      
+      // ✅ CRITICAL: Exclude anything with "tomorrow" or future dates
+      if (text.includes("tomorrow") || text.includes("next week") || text.includes("next month") || text.includes("later")) {
+        return false;
+      }
+      
+      // ✅ Exclude specific future date patterns
+      const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const tomorrowDate = tomorrow.getDate();
+      const tomorrowMonth = tomorrow.toLocaleString('en-US', { month: 'short' }).toLowerCase();
+      
+      // Don't show if it mentions tomorrow's date
+      if (text.includes(`${tomorrowDate} ${tomorrowMonth}`) || text.includes(`${tomorrowMonth} ${tomorrowDate}`)) {
+        return false;
+      }
+      
+      // ✅ STRICT: Only "today" or "tonight" keywords
+      if (text.includes(" today") || text.includes("today ") || text.includes("tonight") || text.includes("by today") || text.includes("due today")) {
+        return true;
+      }
+      
+      // ✅ Check for "asap" or "urgent" or "immediately" (these are for today)
+      if (text.includes("asap") || text.includes("urgent") || text.includes("immediately") || text.includes("right now")) {
+        return true;
+      }
+      
+      // ✅ Check for today's specific date mentioned
+      const today = now.getDate();
+      const todayMonth = now.toLocaleString('en-US', { month: 'short' }).toLowerCase();
+      const todayMonthFull = now.toLocaleString('en-US', { month: 'long' }).toLowerCase();
+      
+      // Match patterns like "by 18 Feb", "due Feb 18", "18th February"
+      const datePatterns = [
+        `${today} ${todayMonth}`,
+        `${todayMonth} ${today}`,
+        `${today} ${todayMonthFull}`,
+        `${todayMonthFull} ${today}`,
+        `by ${today}`,
+        `due ${today}`,
+      ];
+      
+      if (datePatterns.some(pattern => text.includes(pattern))) {
+        // Double check it doesn't also mention tomorrow
+        if (!text.includes("tomorrow")) {
+          return true;
+        }
+      }
+      
+      return false;
+    });
+
+    // ✅ Group by thread and keep only the first email from each thread
+    const seenThreads = new Set();
+    const uniqueTasks = todaysTasks.filter((mail) => {
+      // Create a thread identifier based on subject (remove Re:, Fwd:, etc.)
+      const cleanSubject = (mail.subject || "")
+        .replace(/^(re:|fwd?:|fw:)\s*/gi, "")
+        .trim()
+        .toLowerCase();
+      
+      // If we've seen this thread, skip it
+      if (seenThreads.has(cleanSubject)) {
+        return false;
+      }
+      
+      // Mark this thread as seen
+      seenThreads.add(cleanSubject);
+      return true;
+    });
+
+    // Sort by priority
+    return uniqueTasks.sort((a, b) => getPriorityScore(b) - getPriorityScore(a));
   }
 
   function isSpamEmail(mail: any) {
@@ -1893,15 +2157,31 @@ export default function Home() {
               { key: "starred", label: "⭐ Starred" },
               { key: "todo", label: "✅ To-Do List" },
               { key: "archive", label: "📦 Archive" },
+              { key: "focus", label: "🎯 Focus Mode" },
+              { key: "weekly", label: "📊 Weekly Analysis" },
             ].map((item) => (
               <div
                 key={item.key}
                 onClick={() => {
                   if (item.key === "todo") {
                     setShowTodoView(true);
+                    setShowWeeklyAnalysis(false);
+                    setShowFocusMode(false);
+                    setActiveFolder("inbox");
+                  } else if (item.key === "weekly") {
+                    setShowWeeklyAnalysis(true);
+                    setShowTodoView(false);
+                    setShowFocusMode(false);
+                    setActiveFolder("inbox");
+                  } else if (item.key === "focus") {
+                    setShowFocusMode(true);
+                    setShowTodoView(false);
+                    setShowWeeklyAnalysis(false);
                     setActiveFolder("inbox");
                   } else {
                     setShowTodoView(false);
+                    setShowWeeklyAnalysis(false);
+                    setShowFocusMode(false);
                     setActiveFolder(item.key);
                   }
                   setSidebarOpen(false);
@@ -1913,18 +2193,21 @@ export default function Home() {
                   fontWeight: 600,
                   marginBottom: 8,
                   background:
-                    (item.key === "todo" && showTodoView) || (item.key !== "todo" && activeFolder === item.key && !showTodoView) 
+                    (item.key === "todo" && showTodoView) || 
+                    (item.key === "weekly" && showWeeklyAnalysis) ||
+                    (item.key === "focus" && showFocusMode) ||
+                    (item.key !== "todo" && item.key !== "weekly" && item.key !== "focus" && activeFolder === item.key && !showTodoView && !showWeeklyAnalysis && !showFocusMode) 
                       ? "#DBEAFE" 
                       : "transparent",
                   transition: "all 0.2s ease",
                 }}
                 onMouseOver={(e) => {
-                  if (!((item.key === "todo" && showTodoView) || (item.key !== "todo" && activeFolder === item.key && !showTodoView))) {
+                  if (!((item.key === "todo" && showTodoView) || (item.key === "weekly" && showWeeklyAnalysis) || (item.key === "focus" && showFocusMode) || (item.key !== "todo" && item.key !== "weekly" && item.key !== "focus" && activeFolder === item.key && !showTodoView && !showWeeklyAnalysis && !showFocusMode))) {
                     e.currentTarget.style.background = "#F3F4F6";
                   }
                 }}
                 onMouseOut={(e) => {
-                  if (!((item.key === "todo" && showTodoView) || (item.key !== "todo" && activeFolder === item.key && !showTodoView))) {
+                  if (!((item.key === "todo" && showTodoView) || (item.key === "weekly" && showWeeklyAnalysis) || (item.key === "focus" && showFocusMode) || (item.key !== "todo" && item.key !== "weekly" && item.key !== "focus" && activeFolder === item.key && !showTodoView && !showWeeklyAnalysis && !showFocusMode))) {
                     e.currentTarget.style.background = "transparent";
                   }
                 }}
@@ -2000,7 +2283,6 @@ export default function Home() {
               )}
             </div>
 
-
             {/* Close Button */}
             <button
               onClick={() => setSidebarOpen(false)}
@@ -2022,33 +2304,616 @@ export default function Home() {
         )}
 
         <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-          {/* Email List Sidebar - ✅ PREMIUM COMPACT DESIGN */}
-          <div
-            style={{
-              width: "35%",
-              borderRight: "1px solid #E5E7EB",
-              overflowY: "auto",
+          {/* ✅ FULL-SCREEN WEEKLY ANALYSIS */}
+          {showWeeklyAnalysis ? (
+            <div style={{ 
+              flex: 1, 
+              overflowY: "auto", 
               background: "#F8FAFF",
-            }}
-          >
-            {/* ✅ TO-DO LIST HEADER */}
-            {showTodoView && (
+              padding: "32px 48px"
+            }}>
+              {(() => {
+                const analysis = getWeeklyAnalysis();
+                
+                return (
+                  <div>
+                    {/* Header */}
+                    <div style={{ 
+                      marginBottom: 32,
+                      textAlign: "center"
+                    }}>
+                      <h1 style={{ 
+                        fontSize: 36, 
+                        fontWeight: 700, 
+                        background: "linear-gradient(135deg, #6D28D9 0%, #2563EB 100%)",
+                        WebkitBackgroundClip: "text",
+                        WebkitTextFillColor: "transparent",
+                        marginBottom: 8
+                      }}>
+                        📊 Weekly Analysis
+                      </h1>
+                      <p style={{ fontSize: 16, color: "#6B7280" }}>
+                        Your email insights for the last 7 days
+                      </p>
+                    </div>
+
+                    {/* Stats Grid */}
+                    <div style={{ 
+                      display: "grid", 
+                      gridTemplateColumns: "repeat(4, 1fr)", 
+                      gap: 24, 
+                      marginBottom: 32 
+                    }}>
+                      {/* Emails Received */}
+                      <div style={{
+                        background: "linear-gradient(135deg, #6D28D9 0%, #2563EB 100%)",
+                        borderRadius: 20,
+                        padding: 28,
+                        color: "white",
+                        boxShadow: "0 8px 24px rgba(109, 40, 217, 0.25)",
+                      }}>
+                        <div style={{ fontSize: 16, opacity: 0.9, marginBottom: 12 }}>📧 Emails Received</div>
+                        <div style={{ fontSize: 48, fontWeight: 700 }}>{analysis.weekEmails}</div>
+                        <div style={{ fontSize: 14, opacity: 0.8, marginTop: 8 }}>Last 7 days</div>
+                      </div>
+
+                      {/* Tasks Completed */}
+                      <div style={{
+                        background: "linear-gradient(135deg, #10B981 0%, #059669 100%)",
+                        borderRadius: 20,
+                        padding: 28,
+                        color: "white",
+                        boxShadow: "0 8px 24px rgba(16, 185, 129, 0.25)",
+                      }}>
+                        <div style={{ fontSize: 16, opacity: 0.9, marginBottom: 12 }}>✅ Tasks Completed</div>
+                        <div style={{ fontSize: 48, fontWeight: 700 }}>{analysis.tasksCompleted}</div>
+                        <div style={{ fontSize: 14, opacity: 0.8, marginTop: 8 }}>From archive</div>
+                      </div>
+
+                      {/* Urgent Emails */}
+                      <div style={{
+                        background: "linear-gradient(135deg, #EF4444 0%, #DC2626 100%)",
+                        borderRadius: 20,
+                        padding: 28,
+                        color: "white",
+                        boxShadow: "0 8px 24px rgba(239, 68, 68, 0.25)",
+                      }}>
+                        <div style={{ fontSize: 16, opacity: 0.9, marginBottom: 12 }}>🔥 Urgent Emails</div>
+                        <div style={{ fontSize: 48, fontWeight: 700 }}>{analysis.urgentCount}</div>
+                        <div style={{ fontSize: 14, opacity: 0.8, marginTop: 8 }}>High priority</div>
+                      </div>
+
+                      {/* Late Night */}
+                      <div style={{
+                        background: "linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)",
+                        borderRadius: 20,
+                        padding: 28,
+                        color: "white",
+                        boxShadow: "0 8px 24px rgba(139, 92, 246, 0.25)",
+                      }}>
+                        <div style={{ fontSize: 16, opacity: 0.9, marginBottom: 12 }}>🌙 Late Night Emails</div>
+                        <div style={{ fontSize: 48, fontWeight: 700 }}>{analysis.lateNightCount}</div>
+                        <div style={{ fontSize: 14, opacity: 0.8, marginTop: 8 }}>After 10 PM</div>
+                      </div>
+                    </div>
+
+                    {/* Detailed Analysis Cards */}
+                    <div style={{ 
+                      display: "grid", 
+                      gridTemplateColumns: "repeat(2, 1fr)", 
+                      gap: 24, 
+                      marginBottom: 32 
+                    }}>
+                      {/* Stress Level */}
+                      <div style={{
+                        background: "white",
+                        borderRadius: 20,
+                        padding: 32,
+                        border: "1px solid #E5E7EB",
+                        boxShadow: "0 4px 12px rgba(0,0,0,0.05)",
+                      }}>
+                        <h3 style={{ 
+                          fontSize: 20, 
+                          fontWeight: 700, 
+                          marginBottom: 20, 
+                          color: "#111827" 
+                        }}>
+                          😰 Stress Level
+                        </h3>
+                        <div style={{ 
+                          display: "flex", 
+                          alignItems: "center", 
+                          justifyContent: "space-between", 
+                          marginBottom: 16 
+                        }}>
+                          <span style={{ 
+                            fontSize: 32, 
+                            fontWeight: 700, 
+                            color: analysis.stressColor 
+                          }}>
+                            {analysis.stressLevel}
+                          </span>
+                          <span style={{ 
+                            fontSize: 28, 
+                            fontWeight: 600, 
+                            color: "#111827" 
+                          }}>
+                            {analysis.stressScore}/100
+                          </span>
+                        </div>
+                        {/* Progress Bar */}
+                        <div style={{
+                          width: "100%",
+                          height: 16,
+                          background: "#E5E7EB",
+                          borderRadius: 8,
+                          overflow: "hidden",
+                        }}>
+                          <div style={{
+                            width: `${analysis.stressScore}%`,
+                            height: "100%",
+                            background: `linear-gradient(90deg, ${analysis.stressColor}, ${analysis.stressColor}dd)`,
+                            borderRadius: 8,
+                            transition: "width 0.5s ease",
+                          }} />
+                        </div>
+                        <p style={{ 
+                          fontSize: 14, 
+                          color: "#6B7280", 
+                          marginTop: 16,
+                          lineHeight: 1.6
+                        }}>
+                          Based on urgent keywords, deadlines, and email timing patterns
+                        </p>
+                      </div>
+
+                      {/* Burnout Risk */}
+                      <div style={{
+                        background: "white",
+                        borderRadius: 20,
+                        padding: 32,
+                        border: "1px solid #E5E7EB",
+                        boxShadow: "0 4px 12px rgba(0,0,0,0.05)",
+                      }}>
+                        <h3 style={{ 
+                          fontSize: 20, 
+                          fontWeight: 700, 
+                          marginBottom: 20, 
+                          color: "#111827" 
+                        }}>
+                          🔥 Burnout Risk
+                        </h3>
+                        <div style={{
+                          display: "inline-block",
+                          padding: "16px 32px",
+                          borderRadius: 16,
+                          background: `${analysis.burnoutColor}15`,
+                          border: `3px solid ${analysis.burnoutColor}`,
+                          marginBottom: 16
+                        }}>
+                          <span style={{ 
+                            fontSize: 28, 
+                            fontWeight: 700, 
+                            color: analysis.burnoutColor 
+                          }}>
+                            {analysis.burnoutRisk}
+                          </span>
+                        </div>
+                        <p style={{ 
+                          fontSize: 14, 
+                          color: "#6B7280",
+                          lineHeight: 1.6
+                        }}>
+                          {analysis.lateNightCount > 5 
+                            ? `⚠️ ${analysis.lateNightCount} late-night emails detected. Consider setting email boundaries after 9 PM.`
+                            : "✅ Good work-life balance maintained this week! Keep it up."}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Productivity Rate - Full Width */}
+                    <div style={{
+                      background: "white",
+                      borderRadius: 20,
+                      padding: 32,
+                      border: "1px solid #E5E7EB",
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.05)",
+                      marginBottom: 32,
+                    }}>
+                      <h3 style={{ 
+                        fontSize: 20, 
+                        fontWeight: 700, 
+                        marginBottom: 20, 
+                        color: "#111827" 
+                      }}>
+                        📈 Productivity Rate
+                      </h3>
+                      <div style={{ 
+                        display: "flex", 
+                        alignItems: "center", 
+                        justifyContent: "space-between", 
+                        marginBottom: 16 
+                      }}>
+                        <span style={{ 
+                          fontSize: 48, 
+                          fontWeight: 700, 
+                          color: "#6D28D9" 
+                        }}>
+                          {analysis.productivityRate}%
+                        </span>
+                        <span style={{ 
+                          fontSize: 18, 
+                          color: "#6B7280" 
+                        }}>
+                          {analysis.tasksCompleted} completed out of {analysis.weekEmails} received
+                        </span>
+                      </div>
+                      {/* Progress Bar */}
+                      <div style={{
+                        width: "100%",
+                        height: 20,
+                        background: "#E5E7EB",
+                        borderRadius: 10,
+                        overflow: "hidden",
+                      }}>
+                        <div style={{
+                          width: `${analysis.productivityRate}%`,
+                          height: "100%",
+                          background: "linear-gradient(90deg, #6D28D9, #2563EB)",
+                          borderRadius: 10,
+                          transition: "width 0.5s ease",
+                        }} />
+                      </div>
+                      <p style={{ 
+                        fontSize: 14, 
+                        color: "#6B7280", 
+                        marginTop: 16,
+                        lineHeight: 1.6
+                      }}>
+                        {analysis.productivityRate >= 70 
+                          ? "🎉 Excellent! You're staying on top of your emails."
+                          : analysis.productivityRate >= 40
+                          ? "👍 Good progress. Keep completing those tasks!"
+                          : "💪 Consider focusing on completing pending tasks to improve your productivity."}
+                      </p>
+                    </div>
+
+                    {/* Recommendations */}
+                    <div style={{
+                      background: "linear-gradient(135deg, rgba(109, 40, 217, 0.08) 0%, rgba(37, 99, 235, 0.08) 100%)",
+                      borderRadius: 20,
+                      padding: 32,
+                      border: "1px solid #E5E7EB",
+                    }}>
+                      <h3 style={{ 
+                        fontSize: 20, 
+                        fontWeight: 700, 
+                        marginBottom: 20, 
+                        color: "#111827" 
+                      }}>
+                        💡 Personalized Recommendations
+                      </h3>
+                      <div style={{ 
+                        display: "grid",
+                        gridTemplateColumns: "repeat(2, 1fr)",
+                        gap: 16 
+                      }}>
+                        {analysis.recommendations.map((rec, idx) => (
+                          <div
+                            key={idx}
+                            style={{
+                              background: "white",
+                              padding: 20,
+                              borderRadius: 16,
+                              borderLeft: "4px solid #6D28D9",
+                              fontSize: 15,
+                              color: "#374151",
+                              boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                              lineHeight: 1.6
+                            }}
+                          >
+                            {rec}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          ) : showFocusMode ? (
+            <div style={{ 
+              flex: 1, 
+              overflowY: "auto", 
+              background: "#F8FAFF",
+              padding: "32px 48px"
+            }}>
+              {(() => {
+                const todaysTasks = getTodaysTasks();
+                const now = new Date();
+                const timeOfDay = now.getHours() < 12 ? "Morning" : now.getHours() < 17 ? "Afternoon" : "Evening";
+                
+                return (
+                  <div>
+                    {/* Header */}
+                    <div style={{ 
+                      marginBottom: 32,
+                      textAlign: "center"
+                    }}>
+                      <h1 style={{ 
+                        fontSize: 42, 
+                        fontWeight: 700, 
+                        background: "linear-gradient(135deg, #EF4444 0%, #F59E0B 100%)",
+                        WebkitBackgroundClip: "text",
+                        WebkitTextFillColor: "transparent",
+                        marginBottom: 8
+                      }}>
+                        🎯 Focus Mode
+                      </h1>
+                      <p style={{ fontSize: 18, color: "#6B7280", marginBottom: 4 }}>
+                        Good {timeOfDay}! Here are your urgent tasks for today
+                      </p>
+                      <p style={{ fontSize: 16, color: "#9CA3AF" }}>
+                        {now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                      </p>
+                    </div>
+
+                    {/* Task Count Banner */}
+                    <div style={{
+                      background: todaysTasks.length === 0 
+                        ? "linear-gradient(135deg, #10B981 0%, #059669 100%)"
+                        : todaysTasks.length <= 3
+                        ? "linear-gradient(135deg, #F59E0B 0%, #EF4444 100%)"
+                        : "linear-gradient(135deg, #EF4444 0%, #DC2626 100%)",
+                      borderRadius: 20,
+                      padding: 32,
+                      color: "white",
+                      textAlign: "center",
+                      marginBottom: 32,
+                      boxShadow: "0 8px 24px rgba(239, 68, 68, 0.25)",
+                    }}>
+                      <div style={{ fontSize: 64, fontWeight: 700, marginBottom: 12 }}>
+                        {todaysTasks.length}
+                      </div>
+                      <div style={{ fontSize: 24, fontWeight: 600, opacity: 0.95 }}>
+                        {todaysTasks.length === 0 
+                          ? "🎉 No urgent tasks today!"
+                          : todaysTasks.length === 1
+                          ? "Urgent Task Today"
+                          : "Urgent Tasks Today"}
+                      </div>
+                      {todaysTasks.length > 0 && (
+                        <div style={{ fontSize: 16, opacity: 0.9, marginTop: 8 }}>
+                          Focus on these to stay on track
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Tasks List */}
+                    {todaysTasks.length === 0 ? (
+                      <div style={{
+                        background: "white",
+                        borderRadius: 20,
+                        padding: 48,
+                        textAlign: "center",
+                        border: "1px solid #E5E7EB",
+                      }}>
+                        <div style={{ fontSize: 64, marginBottom: 16 }}>🌟</div>
+                        <h3 style={{ fontSize: 24, fontWeight: 700, color: "#111827", marginBottom: 12 }}>
+                          You're All Caught Up!
+                        </h3>
+                        <p style={{ fontSize: 16, color: "#6B7280", lineHeight: 1.6 }}>
+                          No urgent tasks for today. Take a break or get ahead on tomorrow's work.
+                        </p>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                        {todaysTasks.map((mail, index) => {
+                          const priority = getPriorityScore(mail);
+                          const category = getEmailCategory(mail);
+                          const todoTitle = aiTodoTitles[mail.id] || getSimpleTodoTitle(mail);
+                          const isAIGenerated = !!aiTodoTitles[mail.id];
+
+                          // Generate AI title if not already generated
+                          if (!aiTodoTitles[mail.id]) {
+                            generateAITodoTitle(mail);
+                          }
+
+                          return (
+                            <div
+                              key={mail.id}
+                              onClick={() => {
+                                openMailAndGenerateAI(mail.id, mail);
+                                setShowFocusMode(false);
+                                setActiveFolder("inbox");
+                              }}
+                              style={{
+                                background: "white",
+                                borderRadius: 20,
+                                padding: 28,
+                                border: "2px solid #E5E7EB",
+                                cursor: "pointer",
+                                transition: "all 0.3s ease",
+                                boxShadow: "0 4px 12px rgba(0,0,0,0.05)",
+                              }}
+                              onMouseOver={(e) => {
+                                e.currentTarget.style.transform = "translateY(-4px)";
+                                e.currentTarget.style.boxShadow = "0 12px 24px rgba(0,0,0,0.1)";
+                                e.currentTarget.style.borderColor = "#6D28D9";
+                              }}
+                              onMouseOut={(e) => {
+                                e.currentTarget.style.transform = "translateY(0)";
+                                e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.05)";
+                                e.currentTarget.style.borderColor = "#E5E7EB";
+                              }}
+                            >
+                              {/* Task Number Badge */}
+                              <div style={{
+                                width: 40,
+                                height: 40,
+                                borderRadius: 12,
+                                background: priority >= 80 
+                                  ? "linear-gradient(135deg, #EF4444 0%, #DC2626 100%)"
+                                  : "linear-gradient(135deg, #F59E0B 0%, #EF4444 100%)",
+                                color: "white",
+                                fontWeight: 700,
+                                fontSize: 18,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                marginBottom: 16,
+                                boxShadow: "0 4px 12px rgba(239, 68, 68, 0.25)",
+                              }}>
+                                {index + 1}
+                              </div>
+
+                              {/* Task Title */}
+                              <h3 style={{
+                                fontSize: 22,
+                                fontWeight: 700,
+                                color: isAIGenerated ? "#6D28D9" : "#111827",
+                                marginBottom: 12,
+                                lineHeight: 1.4
+                              }}>
+                                {todoTitle}
+                              </h3>
+
+                              {/* From */}
+                              <p style={{
+                                fontSize: 14,
+                                color: "#6B7280",
+                                marginBottom: 12
+                              }}>
+                                <strong style={{ color: "#111827" }}>From:</strong> {mail.from?.split('<')[0].trim() || mail.from}
+                              </p>
+
+                              {/* Snippet */}
+                              <p style={{
+                                fontSize: 14,
+                                color: "#6B7280",
+                                lineHeight: 1.6,
+                                marginBottom: 16
+                              }}>
+                                {mail.snippet?.substring(0, 150)}...
+                              </p>
+
+                              {/* Badges Row */}
+                              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                                {/* Priority Badge */}
+                                <div style={{
+                                  padding: "8px 16px",
+                                  borderRadius: 12,
+                                  background: `linear-gradient(135deg, ${getCategoryColor(category)}, #00000020)`,
+                                  color: "white",
+                                  fontSize: 13,
+                                  fontWeight: 700,
+                                }}>
+                                  {category} • {priority}
+                                </div>
+
+                                {/* AI Badge */}
+                                {isAIGenerated && (
+                                  <span style={{
+                                    padding: "6px 12px",
+                                    borderRadius: 10,
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    background: "linear-gradient(135deg, #6D28D9 0%, #2563EB 100%)",
+                                    color: "white",
+                                  }}>
+                                    ✨ AI
+                                  </span>
+                                )}
+
+                                {/* Date */}
+                                <span style={{ fontSize: 13, color: "#9CA3AF", marginLeft: "auto" }}>
+                                  {mail.date}
+                                </span>
+                              </div>
+
+                              {/* Action Button */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  markDone();
+                                }}
+                                style={{
+                                  marginTop: 16,
+                                  padding: "12px 24px",
+                                  borderRadius: 12,
+                                  border: "none",
+                                  background: "linear-gradient(135deg, #10B981 0%, #059669 100%)",
+                                  color: "white",
+                                  fontWeight: 700,
+                                  cursor: "pointer",
+                                  fontSize: 14,
+                                  boxShadow: "0 4px 12px rgba(16, 185, 129, 0.25)",
+                                  transition: "all 0.3s ease",
+                                }}
+                                onMouseOver={(e) => {
+                                  e.currentTarget.style.transform = "scale(1.05)";
+                                }}
+                                onMouseOut={(e) => {
+                                  e.currentTarget.style.transform = "scale(1)";
+                                }}
+                              >
+                                ✅ Mark as Done
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Motivational Footer */}
+                    {todaysTasks.length > 0 && (
+                      <div style={{
+                        marginTop: 32,
+                        padding: 24,
+                        background: "linear-gradient(135deg, rgba(109, 40, 217, 0.08) 0%, rgba(37, 99, 235, 0.08) 100%)",
+                        borderRadius: 20,
+                        textAlign: "center",
+                        border: "1px solid #E5E7EB",
+                      }}>
+                        <p style={{ fontSize: 16, color: "#6B7280", lineHeight: 1.6 }}>
+                          💪 <strong style={{ color: "#111827" }}>Pro Tip:</strong> Focus on one task at a time. 
+                          You've got this!
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          ) : (
+            <>
+              {/* Email List Sidebar - ✅ PREMIUM COMPACT DESIGN */}
               <div
                 style={{
-                  padding: "16px",
-                  background: "linear-gradient(135deg, #6D28D9 0%, #2563EB 100%)",
-                  color: "white",
-                  borderBottom: "2px solid #E5E7EB",
+                  width: "35%",
+                  borderRight: "1px solid #E5E7EB",
+                  overflowY: "auto",
+                  background: "#F8FAFF",
                 }}
               >
-                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
-                  ✅ To-Do List
-                </h2>
-                <p style={{ margin: "6px 0 0 0", fontSize: 13, opacity: 0.9 }}>
-                  {displayEmails.length} actionable email{displayEmails.length !== 1 ? 's' : ''} • No spam or promotional
-                </p>
-              </div>
-            )}
+                {/* ✅ TO-DO LIST HEADER */}
+                {showTodoView && (
+                  <div
+                    style={{
+                      padding: "16px",
+                      background: "linear-gradient(135deg, #6D28D9 0%, #2563EB 100%)",
+                      color: "white",
+                      borderBottom: "2px solid #E5E7EB",
+                    }}
+                  >
+                    <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+                      ✅ To-Do List
+                    </h2>
+                    <p style={{ margin: "6px 0 0 0", fontSize: 13, opacity: 0.9 }}>
+                      {displayEmails.length} actionable email{displayEmails.length !== 1 ? 's' : ''} • No spam or promotional
+                    </p>
+                  </div>
+                )}
 
             {/* ✅ NEW: ARCHIVE HEADER */}
             {activeFolder === "archive" && (
@@ -2109,8 +2974,222 @@ export default function Home() {
             )}
 
 
-            {/* ✅ PREMIUM COMPACT EMAIL CARDS */}
-            {displayEmails.map((mail, index) => {
+            {/* ✅ WEEKLY ANALYSIS VIEW */}
+            {showWeeklyAnalysis ? (
+              <div style={{ padding: "24px", overflowY: "auto" }}>
+                {(() => {
+                  const analysis = getWeeklyAnalysis();
+                  
+                  return (
+                    <div>
+                      {/* Stats Grid */}
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, marginBottom: 24 }}>
+                        {/* Emails Received */}
+                        <div style={{
+                          background: "linear-gradient(135deg, #6D28D9 0%, #2563EB 100%)",
+                          borderRadius: 16,
+                          padding: 20,
+                          color: "white",
+                          boxShadow: "0 4px 12px rgba(109, 40, 217, 0.25)",
+                        }}>
+                          <div style={{ fontSize: 14, opacity: 0.9, marginBottom: 8 }}>📧 Emails Received</div>
+                          <div style={{ fontSize: 32, fontWeight: 700 }}>{analysis.weekEmails}</div>
+                          <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>Last 7 days</div>
+                        </div>
+
+                        {/* Tasks Completed */}
+                        <div style={{
+                          background: "linear-gradient(135deg, #10B981 0%, #059669 100%)",
+                          borderRadius: 16,
+                          padding: 20,
+                          color: "white",
+                          boxShadow: "0 4px 12px rgba(16, 185, 129, 0.25)",
+                        }}>
+                          <div style={{ fontSize: 14, opacity: 0.9, marginBottom: 8 }}>✅ Tasks Completed</div>
+                          <div style={{ fontSize: 32, fontWeight: 700 }}>{analysis.tasksCompleted}</div>
+                          <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>From archive</div>
+                        </div>
+
+                        {/* Urgent Emails */}
+                        <div style={{
+                          background: "linear-gradient(135deg, #EF4444 0%, #DC2626 100%)",
+                          borderRadius: 16,
+                          padding: 20,
+                          color: "white",
+                          boxShadow: "0 4px 12px rgba(239, 68, 68, 0.25)",
+                        }}>
+                          <div style={{ fontSize: 14, opacity: 0.9, marginBottom: 8 }}>🔥 Urgent Emails</div>
+                          <div style={{ fontSize: 32, fontWeight: 700 }}>{analysis.urgentCount}</div>
+                          <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>High priority</div>
+                        </div>
+
+                        {/* Late Night */}
+                        <div style={{
+                          background: "linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)",
+                          borderRadius: 16,
+                          padding: 20,
+                          color: "white",
+                          boxShadow: "0 4px 12px rgba(139, 92, 246, 0.25)",
+                        }}>
+                          <div style={{ fontSize: 14, opacity: 0.9, marginBottom: 8 }}>🌙 Late Night Emails</div>
+                          <div style={{ fontSize: 32, fontWeight: 700 }}>{analysis.lateNightCount}</div>
+                          <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>After 10 PM</div>
+                        </div>
+                      </div>
+
+                      {/* Detailed Analysis Cards */}
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, marginBottom: 24 }}>
+                        {/* Stress Level */}
+                        <div style={{
+                          background: "white",
+                          borderRadius: 16,
+                          padding: 24,
+                          border: "1px solid #E5E7EB",
+                          boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                        }}>
+                          <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, color: "#111827" }}>
+                            😰 Stress Level
+                          </h3>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                            <span style={{ fontSize: 24, fontWeight: 700, color: analysis.stressColor }}>
+                              {analysis.stressLevel}
+                            </span>
+                            <span style={{ fontSize: 20, fontWeight: 600, color: "#111827" }}>
+                              {analysis.stressScore}/100
+                            </span>
+                          </div>
+                          {/* Progress Bar */}
+                          <div style={{
+                            width: "100%",
+                            height: 12,
+                            background: "#E5E7EB",
+                            borderRadius: 6,
+                            overflow: "hidden",
+                          }}>
+                            <div style={{
+                              width: `${analysis.stressScore}%`,
+                              height: "100%",
+                              background: `linear-gradient(90deg, ${analysis.stressColor}, ${analysis.stressColor}dd)`,
+                              borderRadius: 6,
+                              transition: "width 0.5s ease",
+                            }} />
+                          </div>
+                          <p style={{ fontSize: 13, color: "#6B7280", marginTop: 12 }}>
+                            Based on urgent keywords, deadlines, and email timing
+                          </p>
+                        </div>
+
+                        {/* Burnout Risk */}
+                        <div style={{
+                          background: "white",
+                          borderRadius: 16,
+                          padding: 24,
+                          border: "1px solid #E5E7EB",
+                          boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                        }}>
+                          <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, color: "#111827" }}>
+                            🔥 Burnout Risk
+                          </h3>
+                          <div style={{
+                            display: "inline-block",
+                            padding: "12px 24px",
+                            borderRadius: 12,
+                            background: `${analysis.burnoutColor}15`,
+                            border: `2px solid ${analysis.burnoutColor}`,
+                          }}>
+                            <span style={{ fontSize: 20, fontWeight: 700, color: analysis.burnoutColor }}>
+                              {analysis.burnoutRisk}
+                            </span>
+                          </div>
+                          <p style={{ fontSize: 13, color: "#6B7280", marginTop: 16 }}>
+                            {analysis.lateNightCount > 5 
+                              ? `${analysis.lateNightCount} late-night emails detected. Consider setting boundaries.`
+                              : "Good work-life balance maintained this week!"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Productivity Rate - Full Width */}
+                      <div style={{
+                        background: "white",
+                        borderRadius: 16,
+                        padding: 24,
+                        border: "1px solid #E5E7EB",
+                        boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                        marginBottom: 24,
+                      }}>
+                        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, color: "#111827" }}>
+                          📈 Productivity Rate
+                        </h3>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                          <span style={{ fontSize: 32, fontWeight: 700, color: "#6D28D9" }}>
+                            {analysis.productivityRate}%
+                          </span>
+                          <span style={{ fontSize: 16, color: "#6B7280" }}>
+                            {analysis.tasksCompleted} completed out of {analysis.weekEmails} received
+                          </span>
+                        </div>
+                        {/* Progress Bar */}
+                        <div style={{
+                          width: "100%",
+                          height: 16,
+                          background: "#E5E7EB",
+                          borderRadius: 8,
+                          overflow: "hidden",
+                        }}>
+                          <div style={{
+                            width: `${analysis.productivityRate}%`,
+                            height: "100%",
+                            background: "linear-gradient(90deg, #6D28D9, #2563EB)",
+                            borderRadius: 8,
+                            transition: "width 0.5s ease",
+                          }} />
+                        </div>
+                        <p style={{ fontSize: 13, color: "#6B7280", marginTop: 12 }}>
+                          {analysis.productivityRate >= 70 
+                            ? "Excellent! You're staying on top of your emails."
+                            : analysis.productivityRate >= 40
+                            ? "Good progress. Keep completing those tasks!"
+                            : "Consider focusing on completing pending tasks."}
+                        </p>
+                      </div>
+
+                      {/* Recommendations */}
+                      <div style={{
+                        background: "linear-gradient(135deg, rgba(109, 40, 217, 0.05) 0%, rgba(37, 99, 235, 0.05) 100%)",
+                        borderRadius: 16,
+                        padding: 24,
+                        border: "1px solid #E5E7EB",
+                      }}>
+                        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, color: "#111827" }}>
+                          💡 Personalized Recommendations
+                        </h3>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                          {analysis.recommendations.map((rec, idx) => (
+                            <div
+                              key={idx}
+                              style={{
+                                background: "white",
+                                padding: 16,
+                                borderRadius: 12,
+                                borderLeft: "4px solid #6D28D9",
+                                fontSize: 14,
+                                color: "#374151",
+                                boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+                              }}
+                            >
+                              {rec}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              /* ✅ PREMIUM COMPACT EMAIL CARDS */
+              displayEmails.map((mail, index) => {
               const score = getPriorityScore(mail);
               const category = getEmailCategory(mail);
               const tasks = showTodoView ? extractTasks(mail.snippet || mail.body || "") : [];
@@ -2356,7 +3435,8 @@ export default function Home() {
                   )}
                 </div>
               );
-            })}
+            })
+            )}
 
             {nextPageToken && (
               <button
@@ -2389,7 +3469,18 @@ export default function Home() {
               overflowY: "scroll",
             }}
           >
-            {!selectedMail ? (
+            {showWeeklyAnalysis ? (
+              <div style={{
+                textAlign: "center",
+                paddingTop: 60,
+                color: "#6B7280"
+              }}>
+                <h2 style={{ fontSize: 24, fontWeight: 700, color: "#111827" }}>
+                  📊 Weekly Analysis
+                </h2>
+                <p style={{ marginTop: 12 }}>View your weekly email statistics and insights on the left panel</p>
+              </div>
+            ) : !selectedMail ? (
               <div style={{
                 textAlign: "center",
                 paddingTop: 60,
@@ -3132,6 +4223,8 @@ export default function Home() {
               </Fragment>
             )}
           </div>
+            </>
+          )}
         </div>
       </div>
       {/* ✅ COMPOSE MODAL POPUP */}
@@ -3164,7 +4257,9 @@ export default function Home() {
             </h2>
 
             <input
-              placeholder="To"
+              placeholder="To (email address)"
+              value={composeTo}
+              onChange={(e) => setComposeTo(e.target.value)}
               style={{
                 width: "100%",
                 padding: 12,
@@ -3176,6 +4271,8 @@ export default function Home() {
 
             <input
               placeholder="Subject"
+              value={composeSubject}
+              onChange={(e) => setComposeSubject(e.target.value)}
               style={{
                 width: "100%",
                 padding: 12,
@@ -3188,33 +4285,46 @@ export default function Home() {
             <textarea
               placeholder="Write your email..."
               rows={6}
+              value={composeBody}
+              onChange={(e) => setComposeBody(e.target.value)}
               style={{
                 width: "100%",
                 padding: 12,
                 marginTop: 10,
                 borderRadius: 10,
                 border: "1px solid #ddd",
+                resize: "vertical",
               }}
             />
 
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button
+                onClick={sendComposedEmail}
+                disabled={sendingEmail}
                 style={{
                   flex: 1,
                   padding: 12,
                   borderRadius: 10,
                   border: "none",
-                  background: "linear-gradient(135deg,#2563EB,#0EA5E9)",
+                  background: sendingEmail 
+                    ? "#9CA3AF" 
+                    : "linear-gradient(135deg,#2563EB,#0EA5E9)",
                   color: "white",
                   fontWeight: 700,
-                  cursor: "pointer",
+                  cursor: sendingEmail ? "not-allowed" : "pointer",
                 }}
               >
-                Send
+                {sendingEmail ? "Sending..." : "Send"}
               </button>
 
               <button
-                onClick={() => setShowCompose(false)}
+                onClick={() => {
+                  setShowCompose(false);
+                  // Clear form on close
+                  setComposeTo("");
+                  setComposeSubject("");
+                  setComposeBody("");
+                }}
                 style={{
                   flex: 1,
                   padding: 12,
