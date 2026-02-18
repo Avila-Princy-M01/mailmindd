@@ -78,6 +78,7 @@ export default function Home() {
     deadline: { total: 0, completed: 0, status: 'idle' as 'idle' | 'loading' | 'done' },
   });
   const [showAiProgress, setShowAiProgress] = useState(false);
+  const [isBatchProcessing, setIsBatchProcessing] = useState(false); // ✅ Track if we're in batch mode
   
   // ⭐ Starred Emails
   const [starredIds, setStarredIds] = useState<string[]>([]);
@@ -461,11 +462,13 @@ export default function Home() {
         [mail.id]: data.result,
       }));
       
-      // Update progress
-      setAiProgress(prev => ({
-        ...prev,
-        priority: { ...prev.priority, completed: prev.priority.completed + 1 }
-      }));
+      // ✅ Only update progress if we're in batch processing mode
+      if (isBatchProcessing) {
+        setAiProgress(prev => ({
+          ...prev,
+          priority: { ...prev.priority, completed: prev.priority.completed + 1 }
+        }));
+      }
     }
   }
 
@@ -545,11 +548,13 @@ export default function Home() {
           [mail.id]: data.result,
         }));
         
-        // Update progress
-        setAiProgress(prev => ({
-          ...prev,
-          category: { ...prev.category, completed: prev.category.completed + 1 }
-        }));
+        // ✅ Only update progress if we're in batch processing mode
+        if (isBatchProcessing) {
+          setAiProgress(prev => ({
+            ...prev,
+            category: { ...prev.category, completed: prev.category.completed + 1 }
+          }));
+        }
       }
     } catch (error) {
       // Silent fail - AI category generation is optional
@@ -580,11 +585,13 @@ export default function Home() {
           [mail.id]: data.result,
         }));
         
-        // Update progress
-        setAiProgress(prev => ({
-          ...prev,
-          spam: { ...prev.spam, completed: prev.spam.completed + 1 }
-        }));
+        // ✅ Only update progress if we're in batch processing mode
+        if (isBatchProcessing) {
+          setAiProgress(prev => ({
+            ...prev,
+            spam: { ...prev.spam, completed: prev.spam.completed + 1 }
+          }));
+        }
       }
     } catch (error) {
       // Silent fail - AI spam detection is optional
@@ -614,11 +621,13 @@ export default function Home() {
           [mail.id]: data.result,
         }));
         
-        // Update progress
-        setAiProgress(prev => ({
-          ...prev,
-          deadline: { ...prev.deadline, completed: prev.deadline.completed + 1 }
-        }));
+        // ✅ Only update progress if we're in batch processing mode
+        if (isBatchProcessing) {
+          setAiProgress(prev => ({
+            ...prev,
+            deadline: { ...prev.deadline, completed: prev.deadline.completed + 1 }
+          }));
+        }
       }
     } catch (error) {
       // Silent fail - AI deadline extraction is optional
@@ -636,6 +645,9 @@ export default function Home() {
     ).slice(0, 20); // Process max 20 emails
     
     if (emailsNeedingAI.length === 0) return;
+    
+    // ✅ Enable batch processing mode
+    setIsBatchProcessing(true);
     
     // Initialize progress
     setShowAiProgress(true);
@@ -667,6 +679,9 @@ export default function Home() {
       spam: { ...prev.spam, status: 'done' },
       deadline: { ...prev.deadline, status: 'done' },
     }));
+    
+    // ✅ Disable batch processing mode
+    setIsBatchProcessing(false);
     
     // Hide progress after 2 seconds
     setTimeout(() => setShowAiProgress(false), 2000);
