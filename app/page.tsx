@@ -4,6 +4,9 @@ import { useEffect, useState, Fragment } from "react";
 import { signOut, useSession, signIn } from "next-auth/react";
 import SplashScreen from "@/components/SplashScreen";
 import Link from "next/link";
+import CalendarView from "@/components/calendar/CalendarView";
+import ReminderPopup from "@/components/calendar/ReminderPopup";
+import TeamCollaboration from "@/components/team/TeamCollaboration";
 
 
 
@@ -144,6 +147,16 @@ export default function Home() {
   
   // ✅ Focus Mode State
   const [showFocusMode, setShowFocusMode] = useState(false);
+  
+  // ✅ Calendar View State
+  const [showCalendarView, setShowCalendarView] = useState(false);
+  const [calendarEvents, setCalendarEvents] = useState<any[]>([]);
+  const [activeReminder, setActiveReminder] = useState<any>(null);
+  
+  // ✅ Team View State
+  const [showTeamView, setShowTeamView] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
+  const [assignedEmails, setAssignedEmails] = useState<any[]>([]);
 
   // 🔍 Search Query
   const [searchQuery, setSearchQuery] = useState("");
@@ -2159,6 +2172,8 @@ export default function Home() {
               { key: "archive", label: "📦 Archive" },
               { key: "focus", label: "🎯 Focus Mode" },
               { key: "weekly", label: "📊 Weekly Analysis" },
+              { key: "calendar", label: "📅 Calendar" },
+              { key: "team", label: "👥 Team" },
             ].map((item) => (
               <div
                 key={item.key}
@@ -2167,21 +2182,43 @@ export default function Home() {
                     setShowTodoView(true);
                     setShowWeeklyAnalysis(false);
                     setShowFocusMode(false);
+                    setShowCalendarView(false);
+                    setShowTeamView(false);
                     setActiveFolder("inbox");
                   } else if (item.key === "weekly") {
                     setShowWeeklyAnalysis(true);
                     setShowTodoView(false);
                     setShowFocusMode(false);
+                    setShowCalendarView(false);
+                    setShowTeamView(false);
                     setActiveFolder("inbox");
                   } else if (item.key === "focus") {
                     setShowFocusMode(true);
                     setShowTodoView(false);
                     setShowWeeklyAnalysis(false);
+                    setShowCalendarView(false);
+                    setShowTeamView(false);
+                    setActiveFolder("inbox");
+                  } else if (item.key === "calendar") {
+                    setShowCalendarView(true);
+                    setShowTodoView(false);
+                    setShowWeeklyAnalysis(false);
+                    setShowFocusMode(false);
+                    setShowTeamView(false);
+                    setActiveFolder("inbox");
+                  } else if (item.key === "team") {
+                    setShowTeamView(true);
+                    setShowTodoView(false);
+                    setShowWeeklyAnalysis(false);
+                    setShowFocusMode(false);
+                    setShowCalendarView(false);
                     setActiveFolder("inbox");
                   } else {
                     setShowTodoView(false);
                     setShowWeeklyAnalysis(false);
                     setShowFocusMode(false);
+                    setShowCalendarView(false);
+                    setShowTeamView(false);
                     setActiveFolder(item.key);
                   }
                   setSidebarOpen(false);
@@ -2196,18 +2233,20 @@ export default function Home() {
                     (item.key === "todo" && showTodoView) || 
                     (item.key === "weekly" && showWeeklyAnalysis) ||
                     (item.key === "focus" && showFocusMode) ||
-                    (item.key !== "todo" && item.key !== "weekly" && item.key !== "focus" && activeFolder === item.key && !showTodoView && !showWeeklyAnalysis && !showFocusMode) 
+                    (item.key === "calendar" && showCalendarView) ||
+                    (item.key === "team" && showTeamView) ||
+                    (item.key !== "todo" && item.key !== "weekly" && item.key !== "focus" && item.key !== "calendar" && item.key !== "team" && activeFolder === item.key && !showTodoView && !showWeeklyAnalysis && !showFocusMode && !showCalendarView && !showTeamView) 
                       ? "#DBEAFE" 
                       : "transparent",
                   transition: "all 0.2s ease",
                 }}
                 onMouseOver={(e) => {
-                  if (!((item.key === "todo" && showTodoView) || (item.key === "weekly" && showWeeklyAnalysis) || (item.key === "focus" && showFocusMode) || (item.key !== "todo" && item.key !== "weekly" && item.key !== "focus" && activeFolder === item.key && !showTodoView && !showWeeklyAnalysis && !showFocusMode))) {
+                  if (!((item.key === "todo" && showTodoView) || (item.key === "weekly" && showWeeklyAnalysis) || (item.key === "focus" && showFocusMode) || (item.key === "calendar" && showCalendarView) || (item.key === "team" && showTeamView) || (item.key !== "todo" && item.key !== "weekly" && item.key !== "focus" && item.key !== "calendar" && item.key !== "team" && activeFolder === item.key && !showTodoView && !showWeeklyAnalysis && !showFocusMode && !showCalendarView && !showTeamView))) {
                     e.currentTarget.style.background = "#F3F4F6";
                   }
                 }}
                 onMouseOut={(e) => {
-                  if (!((item.key === "todo" && showTodoView) || (item.key === "weekly" && showWeeklyAnalysis) || (item.key === "focus" && showFocusMode) || (item.key !== "todo" && item.key !== "weekly" && item.key !== "focus" && activeFolder === item.key && !showTodoView && !showWeeklyAnalysis && !showFocusMode))) {
+                  if (!((item.key === "todo" && showTodoView) || (item.key === "weekly" && showWeeklyAnalysis) || (item.key === "focus" && showFocusMode) || (item.key === "calendar" && showCalendarView) || (item.key === "team" && showTeamView) || (item.key !== "todo" && item.key !== "weekly" && item.key !== "focus" && item.key !== "calendar" && item.key !== "team" && activeFolder === item.key && !showTodoView && !showWeeklyAnalysis && !showFocusMode && !showCalendarView && !showTeamView))) {
                     e.currentTarget.style.background = "transparent";
                   }
                 }}
@@ -2216,6 +2255,8 @@ export default function Home() {
               </div>
 
             ))}
+            
+            {/* Removed external links - now integrated */}
             {[
 
               { key: "snoozed", label: "⏳ Snoozed" },
@@ -2884,6 +2925,172 @@ export default function Home() {
                   </div>
                 );
               })()}
+            </div>
+          ) : showCalendarView ? (
+            <div style={{ 
+              flex: 1, 
+              overflowY: "auto", 
+              background: "#F8FAFF",
+              padding: "32px 48px"
+            }}>
+              <div>
+                {/* Header */}
+                <div style={{ 
+                  marginBottom: 32,
+                  textAlign: "center"
+                }}>
+                  <h1 style={{ 
+                    fontSize: 42, 
+                    fontWeight: 700, 
+                    background: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    marginBottom: 8
+                  }}>
+                    📅 Calendar & Events
+                  </h1>
+                  <p style={{ fontSize: 18, color: "#6B7280", marginBottom: 20 }}>
+                    Track deadlines, meetings, and appointments from your emails
+                  </p>
+                </div>
+
+                {/* Calendar Component */}
+                <CalendarView
+                  events={calendarEvents}
+                  onAddEvent={async (event) => {
+                    try {
+                      const res = await fetch("/api/calendar/events", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(event),
+                      });
+                      const data = await res.json();
+                      setCalendarEvents([...calendarEvents, { ...data.event, date: new Date(data.event.date) }]);
+                    } catch (error) {
+                      console.error("Failed to add event:", error);
+                    }
+                  }}
+                  onDeleteEvent={async (id) => {
+                    try {
+                      await fetch(`/api/calendar/events?id=${id}`, { method: "DELETE" });
+                      setCalendarEvents(calendarEvents.filter(e => e.id !== id));
+                    } catch (error) {
+                      console.error("Failed to delete event:", error);
+                    }
+                  }}
+                  onEventClick={(event) => {
+                    if (event.emailId) {
+                      // Find and open the email
+                      const mail = emails.find(m => m.id === event.emailId);
+                      if (mail) {
+                        openMailAndGenerateAI(mail.id, mail);
+                        setShowCalendarView(false);
+                        setActiveFolder("inbox");
+                      }
+                    }
+                  }}
+                />
+
+                {/* Reminder Popup */}
+                {activeReminder && (
+                  <ReminderPopup
+                    event={activeReminder}
+                    onDismiss={() => setActiveReminder(null)}
+                    onSnooze={(minutes) => {
+                      setTimeout(() => setActiveReminder(activeReminder), minutes * 60000);
+                      setActiveReminder(null);
+                    }}
+                  />
+                )}
+              </div>
+            </div>
+          ) : showTeamView ? (
+            <div style={{ 
+              flex: 1, 
+              overflowY: "auto", 
+              background: "#F8FAFF",
+              padding: "32px 48px"
+            }}>
+              <div>
+                {/* Header */}
+                <div style={{ 
+                  marginBottom: 32,
+                  textAlign: "center"
+                }}>
+                  <h1 style={{ 
+                    fontSize: 42, 
+                    fontWeight: 700, 
+                    background: "linear-gradient(135deg, #0EA5E9 0%, #2563EB 100%)",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    marginBottom: 8
+                  }}>
+                    👥 Team Collaboration
+                  </h1>
+                  <p style={{ fontSize: 18, color: "#6B7280", marginBottom: 20 }}>
+                    Assign emails, track workload, and collaborate with your team
+                  </p>
+                </div>
+
+                {/* Team Component */}
+                <TeamCollaboration
+                  teamMembers={teamMembers.length > 0 ? teamMembers : [
+                    { id: "1", name: "You", email: session?.user?.email || "", activeTasksCount: 0, responseRate: 100 },
+                    { id: "2", name: "Team Member 1", email: "member1@example.com", activeTasksCount: 0, responseRate: 95 },
+                    { id: "3", name: "Team Member 2", email: "member2@example.com", activeTasksCount: 0, responseRate: 90 },
+                  ]}
+                  assignedEmails={assignedEmails}
+                  onAssignEmail={async (emailId, memberId, deadline, notes) => {
+                    try {
+                      const res = await fetch("/api/team/assignments", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          emailId,
+                          assignedTo: memberId,
+                          deadline,
+                          notes,
+                          priority: 50,
+                        }),
+                      });
+                      const data = await res.json();
+                      setAssignedEmails([...assignedEmails, data.assignment]);
+                      alert("✅ Email assigned successfully!");
+                    } catch (error) {
+                      console.error("Failed to assign email:", error);
+                      alert("❌ Failed to assign email");
+                    }
+                  }}
+                  onUpdateStatus={async (emailId, status) => {
+                    try {
+                      await fetch("/api/team/assignments", {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ emailId, status }),
+                      });
+                      setAssignedEmails(assignedEmails.map(a => 
+                        a.emailId === emailId ? { ...a, status } : a
+                      ));
+                    } catch (error) {
+                      console.error("Failed to update status:", error);
+                    }
+                  }}
+                  onAddNote={async (emailId, note) => {
+                    try {
+                      await fetch("/api/team/assignments/notes", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ emailId, note }),
+                      });
+                      setAssignedEmails(assignedEmails.map(a => 
+                        a.emailId === emailId ? { ...a, notes: [...(a.notes || []), note] } : a
+                      ));
+                    } catch (error) {
+                      console.error("Failed to add note:", error);
+                    }
+                  }}
+                />
+              </div>
             </div>
           ) : (
             <>
