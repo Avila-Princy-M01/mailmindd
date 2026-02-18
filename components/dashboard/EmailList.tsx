@@ -1,29 +1,54 @@
 "use client";
 
-export default function EmailList(props: any) {
-    const {
-        emails,
-        filteredEmails,
-        activeTab,
-        setActiveTab,
-        selectedMail,
-        openMailAndGenerateAI,
-        generateAIPriorityForMail,
-        getPriorityScore,
-        getPriorityColor,
-        isSpamEmail,
-        isFirstTimeSender,
-        nextPageToken,
-        loadEmails,
-        loading,
-        sortBy,
-        setSortBy,
-        sortOrder,
-        setSortOrder,
-        deadlineFilter,
-        setDeadlineFilter,
-        extractDeadline,
-    } = props;
+import { Email, SortBy, SortOrder, DeadlineFilter, ActiveTab } from "@/types";
+
+interface EmailListProps {
+  emails: Email[];
+  filteredEmails: Email[];
+  activeTab: ActiveTab;
+  setActiveTab: (tab: ActiveTab) => void;
+  selectedMail: Email | null;
+  openMailAndGenerateAI: (id: string, mail: Email) => void;
+  generateAIPriorityForMail: (mail: Email) => void;
+  getPriorityScore: (mail: Email) => number;
+  getPriorityColor: (score: number) => string;
+  isSpamEmail: (mail: Email) => boolean;
+  isFirstTimeSender: (mail: Email, allEmails: Email[]) => boolean;
+  nextPageToken: string | null;
+  loadEmails: () => void;
+  loading: boolean;
+  sortBy: SortBy;
+  setSortBy: (sort: SortBy) => void;
+  sortOrder: SortOrder;
+  setSortOrder: (order: SortOrder) => void;
+  deadlineFilter: DeadlineFilter;
+  setDeadlineFilter: (filter: DeadlineFilter) => void;
+  extractDeadline: (text: string, mailId?: string) => string | null;
+}
+
+export default function EmailList({
+  emails,
+  filteredEmails,
+  activeTab,
+  setActiveTab,
+  selectedMail,
+  openMailAndGenerateAI,
+  generateAIPriorityForMail,
+  getPriorityScore,
+  getPriorityColor,
+  isSpamEmail,
+  isFirstTimeSender,
+  nextPageToken,
+  loadEmails,
+  loading,
+  sortBy,
+  setSortBy,
+  sortOrder,
+  setSortOrder,
+  deadlineFilter,
+  setDeadlineFilter,
+  extractDeadline,
+}: EmailListProps) {
 
     return (
         <div
