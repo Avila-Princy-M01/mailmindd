@@ -24,7 +24,7 @@ export async function GET(req: Request) {
     // Step 1: Fetch Inbox Message IDs
     const listRes = await gmail.users.messages.list({
       userId: "me",
-      maxResults: 20,
+      maxResults: 5,
       pageToken,
     });
 

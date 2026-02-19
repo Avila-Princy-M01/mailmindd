@@ -56,7 +56,7 @@ export async function POST(req: Request) {
     const listRes = await gmail.users.messages.list({
       userId: "me",
       q: query || undefined,
-      maxResults: 50,
+      maxResults: 5,
     });
 
     const messages = listRes.data.messages || [];
