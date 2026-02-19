@@ -75,7 +75,7 @@ export interface BurnoutStats {
 export type SortBy = "none" | "priority" | "deadline" | "date" | "sender";
 export type SortOrder = "asc" | "desc";
 export type DeadlineFilter = "all" | "today" | "tomorrow" | "week" | "overdue";
-export type ActiveFolder = "inbox" | "starred" | "snoozed" | "done" | "drafts" | "archive";
+export type ActiveFolder = "inbox" | "starred" | "snoozed" | "done" | "drafts" | "archive" | "followups";
 export type ActiveTab = "All Mails" | "Do Now" | "Waiting" | "Needs Decision" | "Low Energy";
 
 export interface Session {

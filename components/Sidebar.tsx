@@ -16,6 +16,7 @@ interface SidebarProps {
   showFocusMode: boolean;
   setShowFocusMode: (show: boolean) => void;
   setShowCompose: (show: boolean) => void;
+  followUpsCount?: number;
 }
 
 export default function Sidebar({
@@ -32,6 +33,7 @@ export default function Sidebar({
   showFocusMode,
   setShowFocusMode,
   setShowCompose,
+  followUpsCount = 0,
 }: SidebarProps) {
   if (!sidebarOpen) return null;
 
@@ -75,6 +77,7 @@ export default function Sidebar({
   const folders = [
     { key: "inbox", label: "📥 Inbox" },
     { key: "starred", label: "⭐ Starred" },
+    { key: "followups", label: `📅 Follow-Ups${followUpsCount > 0 ? ` (${followUpsCount})` : ''}` },
     { key: "todo", label: "✅ To-Do List" },
     { key: "archive", label: "📦 Archive" },
     { key: "focus", label: "🎯 Focus Mode" },

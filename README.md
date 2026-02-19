@@ -271,24 +271,18 @@ const { result } = await response.json();
 - AI deadline extraction
 - Gmail OAuth integration
 - Email sorting and filtering
-- Reply generation
-- Email summarization
-
-### ❌ Not Yet Implemented
-- ChromaDB vector database
-- RAG (Retrieval-Augmented Generation)
-- Semantic search
-- Burnout detection
-- Task extraction with persistence
-- Follow-up management
-- Calendar integration
-- Historical pattern analysis
+- Reply generation with RAG context
+- Email summarization with RAG context
+- RAG (Retrieval-Augmented Generation) for context-aware responses
+- Follow-up management with AI reminders
+- Agentic AI assistant (Handle For Me)
+- To-do title generation
+- Advanced email filtering and search
 
 ## 🛣️ Roadmap
 
 - [ ] Implement semantic search with vector embeddings
 - [ ] Add task management with database persistence
-- [ ] Build follow-up tracking system
 - [ ] Add calendar integration
 - [ ] Implement burnout detection
 - [ ] Mobile responsive design improvements

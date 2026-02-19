@@ -23,11 +23,14 @@ import {
   getUrgencyLevel,
   isFirstTimeSender as isFirstTimeSenderHelper
 } from "@/utils/emailHelpers";
+import { useFollowUps } from "@/hooks/useFollowUps";
 
 
 
 
 export default function Home() {
+  // Follow-Ups Hook
+  const followUpsHook = useFollowUps();
   const { data: session } = useSession();
 
   const [hoverFile, setHoverFile] = useState<Attachment | null>(null);
@@ -293,15 +296,9 @@ export default function Home() {
       if (data.similarEmails && data.similarEmails.length > 0) {
         setSimilarEmails(data.similarEmails);
         setShowSimilar(true);
-        
-        // Show different message based on whether filtered by sender
-        if (data.filteredBySender) {
-          alert(`✅ Found ${data.similarEmails.length} previous emails from ${data.senderEmail}!`);
-        } else {
-          alert(`✅ Found ${data.similarEmails.length} similar emails using RAG!`);
-        }
+        alert(`✅ Found ${data.similarEmails.length} previous emails from ${senderEmail}!`);
       } else {
-        alert("ℹ️ No previous emails from this sender found");
+        alert(`ℹ️ No previous emails from ${senderEmail} found in your inbox`);
       }
     } catch (error) {
       console.error("RAG error:", error);
@@ -1878,6 +1875,11 @@ export default function Home() {
       return false; // We'll display archivedEmails separately
     }
     
+    // ✅ NEW: Follow-Ups View - show follow-up emails
+    if (activeFolder === "followups") {
+      return false; // We'll display followUps separately
+    }
+    
     // Folder filtering first
     if (activeFolder === "starred") return starredIds.includes(mail.id);
     if (activeFolder === "snoozed") return snoozedIds.includes(mail.id);
@@ -2008,8 +2010,12 @@ export default function Home() {
     });
   }
 
-  // ✅ Get emails to display (regular or archived)
-  let displayEmails = activeFolder === "archive" ? archivedEmails : filteredEmails;
+  // ✅ Get emails to display (regular, archived, or follow-ups)
+  let displayEmails = activeFolder === "archive" 
+    ? archivedEmails 
+    : activeFolder === "followups"
+    ? followUpsHook.followUps.map(f => f.email)
+    : filteredEmails;
   
   // ✅ Apply deadline filter
   if (deadlineFilter !== "all" && !showTodoView && !showWeeklyAnalysis && !showFocusMode) {
@@ -2309,6 +2315,7 @@ export default function Home() {
           showFocusMode={showFocusMode}
           setShowFocusMode={setShowFocusMode}
           setShowCompose={setShowCompose}
+          followUpsCount={followUpsHook.followUps.length}
         />
 
         {/* AI Progress Indicator - REMOVED (was causing slow startup) */}
@@ -2545,6 +2552,25 @@ export default function Home() {
                 </h2>
                 <p style={{ margin: "6px 0 0 0", fontSize: 13, opacity: 0.9 }}>
                   {displayEmails.length} completed email{displayEmails.length !== 1 ? 's' : ''}
+                </p>
+              </div>
+            )}
+
+            {/* ✅ NEW: FOLLOW-UPS HEADER */}
+            {activeFolder === "followups" && (
+              <div
+                style={{
+                  padding: "16px",
+                  background: "linear-gradient(135deg, #F59E0B 0%, #EF4444 100%)",
+                  color: "white",
+                  borderBottom: "2px solid #E5E7EB",
+                }}
+              >
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+                  📅 Follow-Ups
+                </h2>
+                <p style={{ margin: "6px 0 0 0", fontSize: 13, opacity: 0.9 }}>
+                  {displayEmails.length} reminder{displayEmails.length !== 1 ? 's' : ''} • Track pending responses
                 </p>
               </div>
             )}
@@ -2968,6 +2994,30 @@ export default function Home() {
                           </span>
                         )}
 
+                        {/* ✅ NEW: Follow-Up Badge */}
+                        {activeFolder === "followups" && (() => {
+                          const followUp = followUpsHook.followUps.find(f => f.emailId === mail.id);
+                          if (!followUp) return null;
+                          const daysLeft = followUp.daysUntilFollowUp;
+                          const isOverdue = new Date(followUp.followUpDate) <= new Date();
+                          return (
+                            <span
+                              style={{
+                                padding: "2px 8px",
+                                borderRadius: 8,
+                                fontSize: 10,
+                                fontWeight: 700,
+                                background: isOverdue 
+                                  ? "linear-gradient(135deg, #EF4444 0%, #DC2626 100%)"
+                                  : "linear-gradient(135deg, #F59E0B 0%, #D97706 100%)",
+                                color: "white",
+                              }}
+                            >
+                              {isOverdue ? "⚠️ Overdue" : `📅 ${daysLeft}d`}
+                            </span>
+                          );
+                        })()}
+
                         {/* AI Badge */}
                         {isAIGenerated && (
                           <span
@@ -3059,6 +3109,49 @@ export default function Home() {
                       </div>
                     </div>
                   )}
+
+                  {/* ✅ FOLLOW-UPS VIEW: Show Reminder */}
+                  {activeFolder === "followups" && (() => {
+                    const followUp = followUpsHook.followUps.find(f => f.emailId === mail.id);
+                    if (!followUp) return null;
+                    return (
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #E5E7EB" }}>
+                        <div style={{ 
+                          fontSize: 11, 
+                          color: "#6B7280",
+                          marginBottom: 6,
+                          fontStyle: "italic"
+                        }}>
+                          💡 {followUp.reminder}
+                        </div>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <span style={{ fontSize: 10, color: "#9CA3AF" }}>
+                            Follow-up: {new Date(followUp.followUpDate).toLocaleDateString()}
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (confirm("Remove this follow-up reminder?")) {
+                                followUpsHook.removeFollowUp(mail.id);
+                              }
+                            }}
+                            style={{
+                              padding: "2px 6px",
+                              fontSize: 10,
+                              borderRadius: 4,
+                              border: "1px solid #EF4444",
+                              background: "white",
+                              color: "#EF4444",
+                              cursor: "pointer",
+                              fontWeight: 600,
+                            }}
+                          >
+                            ✕ Remove
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* AI Priority Reason - Compact */}
                   {aiPriorityMap[mail.id] && (
@@ -3235,6 +3328,25 @@ export default function Home() {
                       }}
                     >
                       {loadingSimilar ? "🔍 Searching..." : "📧 Previous Emails (RAG)"}
+                    </button>
+                    
+                    {/* 📅 Follow-Up Button */}
+                    <button
+                      onClick={() => selectedMail && followUpsHook.addFollowUp(selectedMail)}
+                      disabled={followUpsHook.loadingFollowUp || !selectedMail}
+                      title="Set AI-Powered Follow-Up Reminder"
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: 12,
+                        borderRadius: 8,
+                        border: "2px solid #F59E0B",
+                        cursor: (followUpsHook.loadingFollowUp || !selectedMail) ? "not-allowed" : "pointer",
+                        background: (followUpsHook.loadingFollowUp || !selectedMail) ? "#F3F4F6" : "linear-gradient(135deg, #F59E0B, #D97706)",
+                        color: (followUpsHook.loadingFollowUp || !selectedMail) ? "#6B7280" : "white",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {followUpsHook.loadingFollowUp ? "⏳ Creating..." : "📅 Follow Up"}
                     </button>
                   </div>
                 </div>

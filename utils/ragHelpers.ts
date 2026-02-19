@@ -115,10 +115,21 @@ export async function storeEmailEmbedding(email: {
 
 // Helper function to extract clean email address
 function extractCleanEmail(emailString: string): string {
+  if (!emailString) return "";
+  
   const lower = emailString.toLowerCase().trim();
-  // Try to extract email from "Name <email@domain.com>" format
-  const match = lower.match(/([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/);
-  return match ? match[1] : lower;
+  
+  // Try multiple patterns to extract email
+  // Pattern 1: "Name <email@domain.com>"
+  const angleMatch = lower.match(/<([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})>/);
+  if (angleMatch) return angleMatch[1];
+  
+  // Pattern 2: Direct email "email@domain.com"
+  const directMatch = lower.match(/([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/);
+  if (directMatch) return directMatch[1];
+  
+  // Pattern 3: Just return cleaned string
+  return lower;
 }
 
 // Find similar emails using RAG
@@ -147,23 +158,29 @@ export async function findSimilarEmails(
   // Filter emails
   let filteredEmails = emailEmbeddings.filter(e => e.emailId !== excludeEmailId);
   
-  // NEW: If sender specified, prioritize emails from same sender
+  // NEW: If sender specified, ONLY show emails from same sender (no fallback)
   if (senderEmail) {
     const senderEmailClean = extractCleanEmail(senderEmail);
     
     console.log(`🔍 RAG: Looking for emails from: "${senderEmailClean}"`);
+    console.log(`🔍 RAG: Original sender string: "${senderEmail}"`);
     
     // Log all unique senders in database
     const uniqueSenders = [...new Set(emailEmbeddings.map(e => e.from))];
-    console.log(`🔍 RAG: Available senders (${uniqueSenders.length}):`, uniqueSenders.slice(0, 10));
+    console.log(`🔍 RAG: Available senders (${uniqueSenders.length}):`, uniqueSenders);
     
-    // Log sample of cleaned emails for debugging
-    const sampleCleanedEmails = uniqueSenders.slice(0, 5).map(s => extractCleanEmail(s));
-    console.log(`🔍 RAG: Sample cleaned emails:`, sampleCleanedEmails);
+    // Log ALL cleaned emails for debugging
+    const allCleanedEmails = uniqueSenders.map(s => ({
+      original: s,
+      cleaned: extractCleanEmail(s)
+    }));
+    console.log(`🔍 RAG: All cleaned emails:`, allCleanedEmails);
     
     const senderEmails = filteredEmails.filter(e => {
       const fromEmailClean = extractCleanEmail(e.from);
       const matches = fromEmailClean === senderEmailClean;
+      
+      console.log(`🔍 RAG: Comparing "${fromEmailClean}" === "${senderEmailClean}" = ${matches}`);
       
       if (matches) {
         console.log(`✓ RAG: Match found - "${e.from}" (${fromEmailClean}) matches "${senderEmail}" (${senderEmailClean})`);
@@ -174,15 +191,15 @@ export async function findSimilarEmails(
     
     console.log(`🔍 RAG: Found ${senderEmails.length} emails from sender`);
     
-    // If we have emails from this sender, use only those
-    if (senderEmails.length > 0) {
-      filteredEmails = senderEmails;
-      console.log(`✅ RAG: Using ${senderEmails.length} emails from sender: ${senderEmail}`);
-    } else {
-      console.log(`⚠️ RAG: No previous emails from sender: ${senderEmail}, using semantic search`);
+    // CRITICAL FIX: If no emails from sender, return empty array (don't fall back to semantic search)
+    if (senderEmails.length === 0) {
+      console.log(`⚠️ RAG: No previous emails from sender: ${senderEmail}`);
       console.log(`⚠️ RAG: Searched for: "${senderEmailClean}"`);
-      console.log(`⚠️ RAG: Available emails (first 10):`, uniqueSenders.slice(0, 10).map(s => `${s} -> ${extractCleanEmail(s)}`));
+      return []; // Return empty instead of falling back to semantic search
     }
+    
+    filteredEmails = senderEmails;
+    console.log(`✅ RAG: Using ${senderEmails.length} emails from sender: ${senderEmail}`);
   }
   
   // Calculate similarities
