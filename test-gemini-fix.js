@@ -3,7 +3,7 @@
  * Run: node test-gemini-fix.js
  */
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "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";
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const MODEL = "google/gemini-flash-1.5";
 
 // Test emails with different priority levels

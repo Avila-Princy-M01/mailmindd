@@ -67,7 +67,7 @@ console.log();
 // Check 3: Test API
 console.log("3️⃣ Testing API connection...");
 
-const OPENROUTER_API_KEY = "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";
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
 async function testAPI() {
   try {
