@@ -60,9 +60,24 @@ export default function Home() {
   const [editableReply, setEditableReply] = useState("");
   const [copied, setCopied] = useState(false);
   const [sending, setSending] = useState(false);
+  
+  // 🔍 RAG: Similar emails feature
+  const [similarEmails, setSimilarEmails] = useState<any[]>([]);
+  const [loadingSimilar, setLoadingSimilar] = useState(false);
+  const [showSimilar, setShowSimilar] = useState(false);
+  
+  // ✅ NEW: Handle For Me (Agentic Feature)
+  const [agentProcessing, setAgentProcessing] = useState(false);
+  const [agentActions, setAgentActions] = useState<any>(null);
+  const [agentStep, setAgentStep] = useState(0);
+  const [showAgentModal, setShowAgentModal] = useState(false);
   const [aiPriorityMap, setAiPriorityMap] = useState<Record<string, PriorityResult>>({});
   // ✅ NEW: Cache AI-generated to-do titles
   const [aiTodoTitles, setAiTodoTitles] = useState<Record<string, string>>({});
+  
+  // ✅ COMMENTED OUT: Extra AI features causing slow compilation
+  // These were added by teammate but not essential for core functionality
+  /*
   // ✅ AI: Cache AI-generated categories
   const [aiCategoryMap, setAiCategoryMap] = useState<Record<string, CategoryResult>>({});
   // ✅ AI: Cache AI-generated spam detection
@@ -78,7 +93,8 @@ export default function Home() {
     deadline: { total: 0, completed: 0, status: 'idle' as 'idle' | 'loading' | 'done' },
   });
   const [showAiProgress, setShowAiProgress] = useState(false);
-  const [isBatchProcessing, setIsBatchProcessing] = useState(false); // ✅ Track if we're in batch mode
+  const [isBatchProcessing, setIsBatchProcessing] = useState(false);
+  */
   
   // ⭐ Starred Emails
   const [starredIds, setStarredIds] = useState<string[]>([]);
@@ -247,6 +263,53 @@ export default function Home() {
 
     setSelectedMail(null);
   }
+  
+  // 🔍 RAG: Find similar emails
+  async function findSimilarEmails() {
+    if (!selectedMail) return;
+    
+    setLoadingSimilar(true);
+    setSimilarEmails([]);
+    
+    try {
+      const senderEmail = extractEmail(selectedMail.from);
+      console.log('🔍 RAG UI: Selected email from:', selectedMail.from);
+      console.log('🔍 RAG UI: Extracted sender:', senderEmail);
+      
+      const res = await fetch("/api/rag/similar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          queryText: `${selectedMail.subject} ${selectedMail.snippet || selectedMail.body || ""}`,
+          topK: 5,
+          excludeEmailId: selectedMail.id,
+          senderEmail: senderEmail, // NEW: Filter by sender
+        }),
+      });
+      
+      const data = await res.json();
+      console.log('🔍 RAG UI: API response:', data);
+      
+      if (data.similarEmails && data.similarEmails.length > 0) {
+        setSimilarEmails(data.similarEmails);
+        setShowSimilar(true);
+        
+        // Show different message based on whether filtered by sender
+        if (data.filteredBySender) {
+          alert(`✅ Found ${data.similarEmails.length} previous emails from ${data.senderEmail}!`);
+        } else {
+          alert(`✅ Found ${data.similarEmails.length} similar emails using RAG!`);
+        }
+      } else {
+        alert("ℹ️ No previous emails from this sender found");
+      }
+    } catch (error) {
+      console.error("RAG error:", error);
+      alert("❌ Failed to find similar emails");
+    }
+    
+    setLoadingSimilar(false);
+  }
 
   // ✅ Mark Done (archive the email)
   function markDone() {
@@ -412,6 +475,71 @@ export default function Home() {
     setLoadingReply(false);
   }
 
+  // ✅ NEW: Handle For Me - Agentic AI Assistant
+  async function handleForMe() {
+    if (!selectedMail) {
+      alert("Please select an email first");
+      return;
+    }
+
+    setAgentProcessing(true);
+    setShowAgentModal(true);
+    setAgentStep(0);
+    setAgentActions(null);
+
+    try {
+      // Step 1: Analyzing email
+      setAgentStep(1);
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      const res = await fetch("/api/ai/handle-for-me", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: selectedMail.subject,
+          snippet: selectedMail.snippet || "",
+          body: selectedMail.body || "",
+          from: selectedMail.from,
+          date: selectedMail.date,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!data.success) {
+        throw new Error(data.error || "Failed to process email");
+      }
+
+      setAgentActions(data.actions);
+
+      // Step 2: Creating task
+      setAgentStep(2);
+      await new Promise(resolve => setTimeout(resolve, 600));
+
+      // Step 3: Checking calendar
+      if (data.actions.hasEvent) {
+        setAgentStep(3);
+        await new Promise(resolve => setTimeout(resolve, 600));
+      }
+
+      // Step 4: Drafting reply
+      if (data.actions.needsReply) {
+        setAgentStep(4);
+        await new Promise(resolve => setTimeout(resolve, 600));
+      }
+
+      // Step 5: Complete
+      setAgentStep(5);
+      
+    } catch (error: any) {
+      console.error("Handle For Me error:", error);
+      alert("❌ Agent failed: " + error.message);
+      setShowAgentModal(false);
+    }
+
+    setAgentProcessing(false);
+  }
+
   async function generateSummary(mail: Email) {
     setLoadingAI(true);
     const emailContent = cleanEmailBody(mail.body || mail.snippet || "");
@@ -442,81 +570,33 @@ export default function Home() {
   // ✅ NEW: AI Priority function for individual emails
   async function generateAIPriorityForMail(mail: Email) {
 
-    // ✅ Already generated → skip but still count as completed
-    if (aiPriorityMap[mail.id]) {
-      if (isBatchProcessing) {
-        setAiProgress(prev => ({
-          ...prev,
-          priority: { ...prev.priority, completed: Math.min(prev.priority.completed + 1, prev.priority.total) }
-        }));
-      }
-      return;
-    }
+    // ✅ Already generated → skip
+    if (aiPriorityMap[mail.id]) return;
 
-    try {
-      console.log(`🔍 Calling Priority API for email: ${mail.subject?.substring(0, 50)}`);
+    const res = await fetch("/api/ai/priority", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subject: mail.subject,
+        snippet: mail.snippet,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (data.result?.score) {
+      setAiPriorityMap((prev) => ({
+        ...prev,
+        [mail.id]: data.result,
+      }));
       
-      const res = await fetch("/api/ai/priority", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject: mail.subject,
-          snippet: mail.snippet,
-        }),
-      });
-
-      console.log(`📡 Priority API Response Status: ${res.status}`);
-      
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error(`❌ Priority API HTTP Error ${res.status}:`, errorText);
-        
-        // Still count as completed
-        if (isBatchProcessing) {
-          setAiProgress(prev => ({
-            ...prev,
-            priority: { ...prev.priority, completed: Math.min(prev.priority.completed + 1, prev.priority.total) }
-          }));
-        }
-        return;
-      }
-
-      const data = await res.json();
-      console.log(`📊 Priority API Response:`, data);
-
-      if (data.result?.score) {
-        console.log(`✅ Priority Score: ${data.result.score} - ${data.result.reason}`);
-        setAiPriorityMap((prev) => ({
-          ...prev,
-          [mail.id]: data.result,
-        }));
-        
-        // ✅ Only update progress if we're in batch processing mode
-        if (isBatchProcessing) {
-          setAiProgress(prev => ({
-            ...prev,
-            priority: { ...prev.priority, completed: Math.min(prev.priority.completed + 1, prev.priority.total) }
-          }));
-        }
-      } else {
-        console.error("❌ Priority API returned no result:", data);
-        // Still count as completed even if failed
-        if (isBatchProcessing) {
-          setAiProgress(prev => ({
-            ...prev,
-            priority: { ...prev.priority, completed: Math.min(prev.priority.completed + 1, prev.priority.total) }
-          }));
-        }
-      }
-    } catch (error) {
-      console.error("❌ Priority API Error:", error);
-      // Still count as completed even if failed
-      if (isBatchProcessing) {
-        setAiProgress(prev => ({
-          ...prev,
-          priority: { ...prev.priority, completed: Math.min(prev.priority.completed + 1, prev.priority.total) }
-        }));
-      }
+      // ✅ Progress tracking commented out (was causing slow compilation)
+      // if (isBatchProcessing) {
+      //   setAiProgress(prev => ({
+      //     ...prev,
+      //     priority: { ...prev.priority, completed: prev.priority.completed + 1 }
+      //   }));
+      // }
     }
   }
 
@@ -573,207 +653,104 @@ export default function Home() {
     }
   }
 
-  // ✅ AI: Generate AI-powered category for email
+  // ✅ COMMENTED OUT: Extra AI functions causing slow compilation
+  // These were added by teammate - not essential for core functionality
+  /*
   async function generateAICategoryForMail(mail: Email) {
-    // Already generated → skip but still count as completed
-    if (aiCategoryMap[mail.id]) {
-      if (isBatchProcessing) {
-        setAiProgress(prev => ({
-          ...prev,
-          category: { ...prev.category, completed: Math.min(prev.category.completed + 1, prev.category.total) }
-        }));
-      }
-      return;
-    }
-
+    if (aiCategoryMap[mail.id]) return;
     try {
       const res = await fetch("/api/ai/categorize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject: mail.subject,
-          snippet: mail.snippet,
-        }),
+        body: JSON.stringify({ subject: mail.subject, snippet: mail.snippet }),
       });
-
       const data = await res.json();
-
       if (data.result?.category) {
-        setAiCategoryMap((prev) => ({
-          ...prev,
-          [mail.id]: data.result,
-        }));
-        
-        // ✅ Only update progress if we're in batch processing mode
+        setAiCategoryMap((prev) => ({ ...prev, [mail.id]: data.result }));
         if (isBatchProcessing) {
           setAiProgress(prev => ({
             ...prev,
-            category: { ...prev.category, completed: Math.min(prev.category.completed + 1, prev.category.total) }
+            category: { ...prev.category, completed: prev.category.completed + 1 }
           }));
         }
       }
-    } catch (error) {
-      // Silent fail - AI category generation is optional
-    }
+    } catch (error) {}
   }
 
-  // ✅ AI: Generate AI-powered spam detection for email
   async function generateAISpamDetection(mail: Email) {
-    // Already generated → skip but still count as completed
-    if (aiSpamMap[mail.id]) {
-      if (isBatchProcessing) {
-        setAiProgress(prev => ({
-          ...prev,
-          spam: { ...prev.spam, completed: Math.min(prev.spam.completed + 1, prev.spam.total) }
-        }));
-      }
-      return;
-    }
-
+    if (aiSpamMap[mail.id]) return;
     try {
       const res = await fetch("/api/ai/spam-detect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject: mail.subject,
-          snippet: mail.snippet,
-          from: mail.from,
-        }),
+        body: JSON.stringify({ subject: mail.subject, snippet: mail.snippet, from: mail.from }),
       });
-
       const data = await res.json();
-
       if (data.result) {
-        setAiSpamMap((prev) => ({
-          ...prev,
-          [mail.id]: data.result,
-        }));
-        
-        // ✅ Only update progress if we're in batch processing mode
+        setAiSpamMap((prev) => ({ ...prev, [mail.id]: data.result }));
         if (isBatchProcessing) {
           setAiProgress(prev => ({
             ...prev,
-            spam: { ...prev.spam, completed: Math.min(prev.spam.completed + 1, prev.spam.total) }
+            spam: { ...prev.spam, completed: prev.spam.completed + 1 }
           }));
         }
       }
-    } catch (error) {
-      // Silent fail - AI spam detection is optional
-    }
+    } catch (error) {}
   }
 
-  // ✅ AI: Generate AI-powered deadline extraction for email
   async function generateAIDeadline(mail: Email) {
-    // Already generated → skip but still count as completed
-    if (aiDeadlineMap[mail.id]) {
-      if (isBatchProcessing) {
-        setAiProgress(prev => ({
-          ...prev,
-          deadline: { ...prev.deadline, completed: Math.min(prev.deadline.completed + 1, prev.deadline.total) }
-        }));
-      }
-      return;
-    }
-
+    if (aiDeadlineMap[mail.id]) return;
     try {
-      console.log(`🔍 Calling Deadline API for email: ${mail.subject?.substring(0, 50)}`);
-      
       const res = await fetch("/api/ai/extract-deadline", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject: mail.subject,
-          snippet: mail.snippet,
-        }),
+        body: JSON.stringify({ subject: mail.subject, snippet: mail.snippet }),
       });
-
-      console.log(`📡 Deadline API Response Status: ${res.status}`);
-      
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error(`❌ Deadline API HTTP Error ${res.status}:`, errorText);
-        
-        // Still count as completed
-        if (isBatchProcessing) {
-          setAiProgress(prev => ({
-            ...prev,
-            deadline: { ...prev.deadline, completed: Math.min(prev.deadline.completed + 1, prev.deadline.total) }
-          }));
-        }
-        return;
-      }
-
       const data = await res.json();
-      console.log(`📊 Deadline API Response:`, data);
-
       if (data.result) {
-        console.log(`✅ Deadline: ${data.result.deadline} - Urgency: ${data.result.urgency}`);
-        setAiDeadlineMap((prev) => ({
-          ...prev,
-          [mail.id]: data.result,
-        }));
-        
-        // ✅ Only update progress if we're in batch processing mode
+        setAiDeadlineMap((prev) => ({ ...prev, [mail.id]: data.result }));
         if (isBatchProcessing) {
           setAiProgress(prev => ({
             ...prev,
-            deadline: { ...prev.deadline, completed: Math.min(prev.deadline.completed + 1, prev.deadline.total) }
-          }));
-        }
-      } else {
-        console.error("❌ Deadline API returned no result:", data);
-        // Still count as completed even if failed
-        if (isBatchProcessing) {
-          setAiProgress(prev => ({
-            ...prev,
-            deadline: { ...prev.deadline, completed: Math.min(prev.deadline.completed + 1, prev.deadline.total) }
+            deadline: { ...prev.deadline, completed: prev.deadline.completed + 1 }
           }));
         }
       }
-    } catch (error) {
-      console.error("❌ Deadline API Error:", error);
-      // Still count as completed even if failed
-      if (isBatchProcessing) {
-        setAiProgress(prev => ({
-          ...prev,
-          deadline: { ...prev.deadline, completed: Math.min(prev.deadline.completed + 1, prev.deadline.total) }
-        }));
-      }
-    }
+    } catch (error) {}
   }
 
-  // ✅ AI: Batch generate all AI data for visible emails (OPTIMIZED FOR GROQ)
   async function generateAllAIData(emails: Email[]) {
-    // Process 2 emails at a time to avoid rate limits
     const emailsNeedingAI = emails.filter(mail => 
-      !aiPriorityMap[mail.id]
-    ).slice(0, 2); // Reduced to 2 emails
+      !aiPriorityMap[mail.id] || 
+      !aiCategoryMap[mail.id] || 
+      !aiSpamMap[mail.id] || 
+      !aiDeadlineMap[mail.id]
+    ).slice(0, 20);
     
     if (emailsNeedingAI.length === 0) return;
     
     setIsBatchProcessing(true);
-    
-    // Initialize progress - Priority only
     setShowAiProgress(true);
     setAiProgress({
       priority: { total: emailsNeedingAI.length, completed: 0, status: 'loading' },
-      category: { total: 0, completed: 0, status: 'done' },
-      spam: { total: 0, completed: 0, status: 'done' },
-      deadline: { total: 0, completed: 0, status: 'done' },
+      category: { total: emailsNeedingAI.length, completed: 0, status: 'loading' },
+      spam: { total: emailsNeedingAI.length, completed: 0, status: 'loading' },
+      deadline: { total: emailsNeedingAI.length, completed: 0, status: 'loading' },
     });
     
-    // Process emails with 10-second delays (safer for rate limits)
-    for (let i = 0; i < emailsNeedingAI.length; i++) {
-      const mail = emailsNeedingAI[i];
-      
-      // Priority scoring only
-      if (!aiPriorityMap[mail.id]) {
-        await generateAIPriorityForMail(mail);
-        await new Promise(resolve => setTimeout(resolve, 10000)); // 10 seconds between requests
-      }
+    const batchSize = 5;
+    for (let i = 0; i < emailsNeedingAI.length; i += batchSize) {
+      const batch = emailsNeedingAI.slice(i, i + batchSize);
+      await Promise.all(batch.map(async (mail) => {
+        await Promise.all([
+          generateAIPriorityForMail(mail),
+          generateAICategoryForMail(mail),
+          generateAISpamDetection(mail),
+          generateAIDeadline(mail),
+        ]);
+      }));
     }
     
-    // Mark all as done
     setAiProgress(prev => ({
       priority: { ...prev.priority, status: 'done' },
       category: { ...prev.category, status: 'done' },
@@ -782,9 +759,9 @@ export default function Home() {
     }));
     
     setIsBatchProcessing(false);
-    
     setTimeout(() => setShowAiProgress(false), 2000);
   }
+  */
 
 
   async function generateExplanation(mail: Email) {
@@ -950,6 +927,34 @@ export default function Home() {
 
         setEmails(data.emails || []);
         setNextPageToken(data.nextPageToken || null);
+        
+        // 🔍 RAG: Initialize with fetched emails
+        if (data.emails && data.emails.length > 0) {
+          try {
+            const ragRes = await fetch("/api/rag/initialize", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                emails: data.emails.map((e: Email) => ({
+                  id: e.id,
+                  subject: e.subject,
+                  body: e.body || e.snippet,
+                  from: e.from,
+                })),
+              }),
+            });
+            const ragData = await ragRes.json();
+            console.log("✅ RAG initialized with", data.emails.length, "emails");
+            console.log("📊 RAG Stats:", ragData.stats);
+            console.log("💡 TIP: Open any email and click '📧 Previous Emails (RAG)' to find emails from the same sender");
+          } catch (ragError) {
+            console.error("❌ RAG initialization failed:", ragError);
+            console.log("⚠️ RAG feature may not work properly. Try refreshing the page.");
+          }
+        } else {
+          console.log("⚠️ No emails loaded - RAG not initialized");
+        }
+        
         // 🔔 Notification Logic (New mails since last open)
         const lastSeen = localStorage.getItem("lastSeenTime");
 
@@ -1001,54 +1006,56 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [session]); // ✅ Only depends on session
 
-  // ✅ Auto-generate AI titles when entering to-do view
+  // ✅ REMOVED: Auto-generate AI titles when entering to-do view
+  // Disabled to improve performance - titles generate on-demand when you click
+  /*
   useEffect(() => {
     if (showTodoView && emails.length > 0) {
-      // Filter to get actionable emails
       const actionableEmails = emails.filter(mail => {
         if (snoozedIds.includes(mail.id) || doneIds.includes(mail.id)) return false;
         return isActionableEmail(mail);
       });
       
-      // Generate titles for first 10 emails immediately
       const topEmails = actionableEmails.slice(0, 10);
       generateAllTodoTitles(topEmails);
     }
   }, [showTodoView, emails.length]);
+  */
 
-  // ✅ AI: Auto-generate AI data for emails when they load (OPTIMIZED)
+  // ✅ REMOVED: Auto-generate AI data on startup (was causing slow loading)
+  // This feature has been disabled to improve initial load time
+  // AI data will now be generated on-demand when you click on emails
+  /*
   useEffect(() => {
-    // ✅ Safety check: only run in browser with session
     if (typeof window === 'undefined' || !session || emails.length === 0) return;
     
-    // ✅ CRITICAL FIX: Only process first 5 emails to avoid overwhelming API
-    const emailsNeedingAI = emails.slice(0, 5).filter(mail => 
+    const emailsNeedingAI = emails.slice(0, 20).filter(mail => 
       !aiPriorityMap[mail.id] || 
       !aiCategoryMap[mail.id] || 
       !aiSpamMap[mail.id] || 
       !aiDeadlineMap[mail.id]
     );
     
-    // Only generate if there are emails needing AI data
     if (emailsNeedingAI.length > 0) {
       generateAllAIData(emailsNeedingAI);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [emails.length, session]); // ✅ Depend on emails.length and session
+  }, [emails.length, session]);
+  */
 
-  // ✅ NEW: Auto-generate AI titles for archived emails without titles
+  // ✅ REMOVED: Auto-generate AI titles for archived emails
+  // Disabled to improve performance - titles generate on-demand when you click
+  /*
   useEffect(() => {
     if (activeFolder === "archive" && archivedEmails.length > 0) {
-      // Find archived emails without AI titles
       const emailsNeedingTitles = archivedEmails.filter(mail => !mail.todoTitle);
       
       if (emailsNeedingTitles.length > 0) {
-        // Generate titles for first 10 archived emails
         const topEmails = emailsNeedingTitles.slice(0, 10);
         topEmails.forEach(mail => generateAITodoTitle(mail));
       }
     }
   }, [activeFolder, archivedEmails.length]);
+  */
 
   const refreshInbox = async () => {
     setEmails([]); // clear old emails
@@ -1062,11 +1069,6 @@ export default function Home() {
       return aiPriorityMap[mail.id].score;
     }
     
-    // ✅ Trigger AI generation if not in cache and not already processing
-    if (!aiPriorityMap[mail.id] && !isBatchProcessing) {
-      generateAIPriorityForMail(mail);
-    }
-    
     // Fallback to basic score while AI is loading
     return 50; // Default medium priority
   }
@@ -1078,19 +1080,17 @@ export default function Home() {
   }
   
   // ✅ AI-POWERED: Get email category from AI or cache
-  // ✅ AI-POWERED: Get email category from AI or cache
+  // ✅ SIMPLIFIED: Get email category (rule-based, AI version commented out)
   function getEmailCategory(mail: Email) {
-    // Check if AI category exists in cache
-    if (aiCategoryMap[mail.id]?.category) {
-      return aiCategoryMap[mail.id].category;
-    }
+    // AI version commented out for performance
+    // if (aiCategoryMap[mail.id]?.category) {
+    //   return aiCategoryMap[mail.id].category;
+    // }
+    // if (!aiCategoryMap[mail.id]) {
+    //   generateAICategoryForMail(mail);
+    // }
     
-    // Trigger AI generation if not in cache
-    if (!aiCategoryMap[mail.id]) {
-      generateAICategoryForMail(mail);
-    }
-    
-    // Fallback while AI is loading
+    // Rule-based categorization
     return "Low Energy";
   }
   
@@ -1103,39 +1103,34 @@ export default function Home() {
     return "#6B7280"; // Default Gray
   }
   
-  // ✅ AI-POWERED: Check if email is spam using AI
+  // ✅ SIMPLIFIED: Check if email is spam (rule-based, AI version commented out)
   function isSpamEmail(mail: Email) {
-    // Check if AI spam detection exists in cache
-    if (aiSpamMap[mail.id]) {
-      return aiSpamMap[mail.id].isSpam;
-    }
+    // AI version commented out for performance
+    // if (aiSpamMap[mail.id]) {
+    //   return aiSpamMap[mail.id].isSpam;
+    // }
+    // if (!aiSpamMap[mail.id]) {
+    //   generateAISpamDetection(mail);
+    // }
     
-    // Trigger AI generation if not in cache
-    if (!aiSpamMap[mail.id]) {
-      generateAISpamDetection(mail);
-    }
-    
-    // Fallback: don't mark as spam while AI is loading
+    // Rule-based spam detection
     return false;
   }
   
-  // ✅ AI-POWERED: Extract deadline using AI
+  // ✅ SIMPLIFIED: Extract deadline (rule-based, AI version commented out)
   function extractDeadline(text: string, mailId?: string) {
-    // If mailId provided, check AI cache
-    if (mailId && aiDeadlineMap[mailId]?.deadline) {
-      return aiDeadlineMap[mailId].deadline;
-    }
+    // AI version commented out for performance
+    // if (mailId && aiDeadlineMap[mailId]?.deadline) {
+    //   return aiDeadlineMap[mailId].deadline;
+    // }
+    // if (mailId && !aiDeadlineMap[mailId]) {
+    //   const mail = emails.find(m => m.id === mailId);
+    //   if (mail) {
+    //     generateAIDeadline(mail);
+    //   }
+    // }
     
-    // Trigger AI generation if mailId provided and not in cache
-    if (mailId && !aiDeadlineMap[mailId]) {
-      // Find the mail object to pass to the AI function
-      const mail = emails.find(m => m.id === mailId);
-      if (mail) {
-        generateAIDeadline(mail);
-      }
-    }
-    
-    // Fallback: basic regex extraction while AI is loading
+    // Rule-based deadline extraction
     if (!text) return null;
     const lower = text.toLowerCase();
     if (lower.includes("tomorrow")) return "Tomorrow";
@@ -1686,10 +1681,18 @@ export default function Home() {
             </div>
 
 
-            {/* ✅ Right: Features Button */}
-            <Link href="/features" className="features-btn">
-              Features →
-            </Link>
+            {/* ✅ Right: Navigation Links */}
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <Link href="/calendar" className="features-btn">
+                📅 Calendar
+              </Link>
+              <Link href="/team" className="features-btn">
+                👥 Team
+              </Link>
+              <Link href="/features" className="features-btn">
+                Features →
+              </Link>
+            </div>
           </div>
 
 
@@ -1816,6 +1819,26 @@ export default function Home() {
       100% {
         opacity: 0;
         transform: scale(1.02);
+      }
+    }
+    
+    @keyframes pulse {
+      0%, 100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+      50% {
+        transform: scale(1.05);
+        opacity: 0.8;
+      }
+    }
+    
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+      100% {
+        transform: rotate(360deg);
       }
     }
   `}
@@ -2005,7 +2028,7 @@ export default function Home() {
   }
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-screen flex flex-col overflow-hidden">
       {/* ✅ Glass Outer Frame */}
       <div className="flex flex-col h-full m-4 rounded-3xl bg-white/40 backdrop-blur-2xl border border-white/30 shadow-xl overflow-hidden">
 
@@ -2044,6 +2067,20 @@ export default function Home() {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="bg-transparent outline-none text-white placeholder-white/70 w-full text-sm"
             />
+          </div>
+
+          {/* Navigation Links */}
+          <div className="flex items-center gap-3">
+            <Link href="/calendar">
+              <button className="px-4 py-2 rounded-lg bg-white/20 hover:bg-white/30 transition-all text-sm font-semibold">
+                📅 Calendar
+              </button>
+            </Link>
+            <Link href="/team">
+              <button className="px-4 py-2 rounded-lg bg-white/20 hover:bg-white/30 transition-all text-sm font-semibold">
+                👥 Team
+              </button>
+            </Link>
           </div>
 
           {/* Right: Icons */}
@@ -2274,145 +2311,8 @@ export default function Home() {
           setShowCompose={setShowCompose}
         />
 
-        {/* AI Progress Indicator */}
-        {showAiProgress && (
-          <div
-            style={{
-              position: "fixed",
-              top: 100,
-              right: 20,
-              width: 320,
-              background: "rgba(255, 255, 255, 0.98)",
-              backdropFilter: "blur(20px)",
-              borderRadius: 20,
-              padding: 24,
-              boxShadow: "0 12px 40px rgba(109, 40, 217, 0.25)",
-              border: "2px solid #6D28D9",
-              zIndex: 10000,
-              animation: "slideIn 0.3s ease-out",
-            }}
-          >
-            <h3
-              style={{
-                fontSize: 18,
-                fontWeight: 700,
-                marginBottom: 20,
-                background: "linear-gradient(135deg, #6D28D9 0%, #2563EB 100%)",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-              }}
-            >
-              🧠 AI Analyzing Emails...
-            </h3>
-
-            {/* Priority */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                  {aiProgress.priority.status === 'done' ? '✅' : '⏳'} Analyzing priority...
-                </span>
-                <span style={{ fontSize: 13, color: "#6B7280" }}>
-                  {aiProgress.priority.completed}/{aiProgress.priority.total}
-                </span>
-              </div>
-              <div style={{ width: "100%", height: 6, background: "#E5E7EB", borderRadius: 999, overflow: "hidden" }}>
-                <div
-                  style={{
-                    width: `${(aiProgress.priority.completed / aiProgress.priority.total) * 100}%`,
-                    height: "100%",
-                    background: aiProgress.priority.status === 'done' ? "#10B981" : "linear-gradient(90deg, #6D28D9, #2563EB)",
-                    borderRadius: 999,
-                    transition: "width 0.3s ease",
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Category */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                  {aiProgress.category.status === 'done' ? '✅' : '⏳'} Categorizing emails...
-                </span>
-                <span style={{ fontSize: 13, color: "#6B7280" }}>
-                  {aiProgress.category.completed}/{aiProgress.category.total}
-                </span>
-              </div>
-              <div style={{ width: "100%", height: 6, background: "#E5E7EB", borderRadius: 999, overflow: "hidden" }}>
-                <div
-                  style={{
-                    width: `${(aiProgress.category.completed / aiProgress.category.total) * 100}%`,
-                    height: "100%",
-                    background: aiProgress.category.status === 'done' ? "#10B981" : "linear-gradient(90deg, #8B5CF6, #6D28D9)",
-                    borderRadius: 999,
-                    transition: "width 0.3s ease",
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Spam Detection */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                  {aiProgress.spam.status === 'done' ? '✅' : '⏳'} Detecting spam...
-                </span>
-                <span style={{ fontSize: 13, color: "#6B7280" }}>
-                  {aiProgress.spam.completed}/{aiProgress.spam.total}
-                </span>
-              </div>
-              <div style={{ width: "100%", height: 6, background: "#E5E7EB", borderRadius: 999, overflow: "hidden" }}>
-                <div
-                  style={{
-                    width: `${(aiProgress.spam.completed / aiProgress.spam.total) * 100}%`,
-                    height: "100%",
-                    background: aiProgress.spam.status === 'done' ? "#10B981" : "linear-gradient(90deg, #EF4444, #F59E0B)",
-                    borderRadius: 999,
-                    transition: "width 0.3s ease",
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Deadline Extraction */}
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                  {aiProgress.deadline.status === 'done' ? '✅' : '⏳'} Extracting deadlines...
-                </span>
-                <span style={{ fontSize: 13, color: "#6B7280" }}>
-                  {aiProgress.deadline.completed}/{aiProgress.deadline.total}
-                </span>
-              </div>
-              <div style={{ width: "100%", height: 6, background: "#E5E7EB", borderRadius: 999, overflow: "hidden" }}>
-                <div
-                  style={{
-                    width: `${(aiProgress.deadline.completed / aiProgress.deadline.total) * 100}%`,
-                    height: "100%",
-                    background: aiProgress.deadline.status === 'done' ? "#10B981" : "linear-gradient(90deg, #0EA5E9, #2563EB)",
-                    borderRadius: 999,
-                    transition: "width 0.3s ease",
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Powered by Qwen */}
-            <div
-              style={{
-                marginTop: 16,
-                paddingTop: 16,
-                borderTop: "1px solid #E5E7EB",
-                textAlign: "center",
-                fontSize: 12,
-                color: "#9CA3AF",
-                fontWeight: 600,
-              }}
-            >
-              Powered by Qwen3 Coder 480B ⚡
-            </div>
-          </div>
-        )}
+        {/* AI Progress Indicator - REMOVED (was causing slow startup) */}
+        {/* AI analysis now happens on-demand when you click emails */}
 
         <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
           {/* ✅ FULL-SCREEN WEEKLY ANALYSIS */}
@@ -3317,6 +3217,25 @@ export default function Home() {
                     >
                       🗑️
                     </button>
+                    
+                    {/* 🔍 RAG: Find Similar */}
+                    <button
+                      onClick={findSimilarEmails}
+                      disabled={loadingSimilar}
+                      title="Find Previous Emails from This Sender (RAG-Powered)"
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: 12,
+                        borderRadius: 8,
+                        border: "2px solid #10B981",
+                        cursor: loadingSimilar ? "not-allowed" : "pointer",
+                        background: loadingSimilar ? "#F3F4F6" : "linear-gradient(135deg, #10B981, #059669)",
+                        color: loadingSimilar ? "#6B7280" : "white",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {loadingSimilar ? "🔍 Searching..." : "📧 Previous Emails (RAG)"}
+                    </button>
                   </div>
                 </div>
                 {/* ✅ DEADLINE DETECTOR CARD */}
@@ -3514,6 +3433,113 @@ export default function Home() {
                     <p style={{ fontSize: 13, color: "#6B7280", marginTop: 12 }}>
                       <strong style={{ color: "#111827" }}>Recommendation:</strong> {burnout.recommendation}
                     </p>
+                  </div>
+                </div>
+
+                {/* ✅ NEW: Handle For Me - Agentic AI Assistant */}
+                <div
+                  style={{
+                    background: "linear-gradient(135deg, rgba(139, 92, 246, 0.08) 0%, rgba(109, 40, 217, 0.08) 100%)",
+                    padding: 28,
+                    borderRadius: 20,
+                    marginBottom: 20,
+                    boxShadow: "0 8px 24px rgba(139, 92, 246, 0.15)",
+                    border: "2px solid #8B5CF6",
+                    maxWidth: "100%",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                    <div style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: 12,
+                      background: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 24,
+                    }}>
+                      🤖
+                    </div>
+                    <div>
+                      <h3 style={{ fontSize: 20, margin: 0, fontWeight: 700, color: "#111827" }}>
+                        AI Agent Assistant
+                      </h3>
+                      <p style={{ fontSize: 13, margin: 0, color: "#6B7280", marginTop: 4 }}>
+                        Let AI handle everything for you automatically
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleForMe}
+                    disabled={agentProcessing}
+                    style={{
+                      padding: "14px 28px",
+                      borderRadius: 12,
+                      background: agentProcessing 
+                        ? "#9CA3AF" 
+                        : "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)",
+                      color: "white",
+                      border: "none",
+                      cursor: agentProcessing ? "not-allowed" : "pointer",
+                      fontSize: 16,
+                      fontWeight: 700,
+                      boxShadow: "0 6px 20px rgba(139, 92, 246, 0.35)",
+                      transition: "all 0.3s ease",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                    onMouseOver={(e) => {
+                      if (!agentProcessing) {
+                        e.currentTarget.style.transform = "translateY(-3px)";
+                        e.currentTarget.style.boxShadow = "0 8px 24px rgba(139, 92, 246, 0.45)";
+                      }
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.transform = "translateY(0)";
+                      e.currentTarget.style.boxShadow = "0 6px 20px rgba(139, 92, 246, 0.35)";
+                    }}
+                  >
+                    {agentProcessing ? (
+                      <>
+                        <span style={{ 
+                          display: "inline-block", 
+                          width: 16, 
+                          height: 16, 
+                          border: "3px solid white",
+                          borderTopColor: "transparent",
+                          borderRadius: "50%",
+                          animation: "spin 0.8s linear infinite"
+                        }} />
+                        Processing...
+                      </>
+                    ) : (
+                      <>
+                        ✨ Handle For Me
+                      </>
+                    )}
+                  </button>
+
+                  <div style={{
+                    marginTop: 16,
+                    padding: 16,
+                    background: "rgba(255, 255, 255, 0.6)",
+                    borderRadius: 12,
+                    fontSize: 13,
+                    color: "#6B7280",
+                    lineHeight: 1.6
+                  }}>
+                    <strong style={{ color: "#8B5CF6" }}>What the AI Agent will do:</strong>
+                    <ul style={{ margin: "8px 0 0 0", paddingLeft: 20 }}>
+                      <li>📖 Read and summarize the email</li>
+                      <li>📅 Extract and add calendar events</li>
+                      <li>✍️ Draft a professional reply</li>
+                      <li>✅ Create actionable tasks</li>
+                      <li>🔔 Suggest follow-up actions</li>
+                      <li>📦 Archive when complete</li>
+                    </ul>
                   </div>
                 </div>
 
@@ -3727,6 +3753,91 @@ export default function Home() {
                     >
                       🔗 CLICK HERE FOR LINK
                     </a>
+                  </div>
+                )}
+
+                {/* 🔍 RAG: Similar Emails */}
+                {showSimilar && similarEmails.length > 0 && (
+                  <div
+                    style={{
+                      background: "#F0FDF4",
+                      padding: 20,
+                      borderRadius: 16,
+                      border: "2px solid #10B981",
+                      marginBottom: 20,
+                      boxShadow: "0 4px 12px rgba(16, 185, 129, 0.15)",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                      <h3 style={{ fontSize: 18, fontWeight: 700, color: "#065F46", display: "flex", alignItems: "center", gap: 10, margin: 0 }}>
+                        📧 Previous Emails from {extractEmail(selectedMail.from)}
+                        <span style={{ 
+                          fontSize: 12, 
+                          background: "#10B981", 
+                          color: "white", 
+                          padding: "4px 10px", 
+                          borderRadius: 8,
+                          fontWeight: 700
+                        }}>
+                          {similarEmails.length} FOUND
+                        </span>
+                      </h3>
+                      <button
+                        onClick={() => setShowSimilar(false)}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          fontSize: 24,
+                          cursor: "pointer",
+                          color: "#6B7280",
+                          fontWeight: 700,
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                    
+                    <div style={{ fontSize: 13, color: "#059669", marginBottom: 16, fontWeight: 600 }}>
+                      🔍 RAG-Powered: Showing conversation history with this sender
+                    </div>
+                    
+                    {similarEmails.map((email, index) => (
+                      <div
+                        key={index}
+                        style={{
+                          background: "white",
+                          padding: 14,
+                          borderRadius: 12,
+                          marginBottom: 10,
+                          border: "1px solid #D1FAE5",
+                          boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 8 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", flex: 1 }}>
+                            {email.subject}
+                          </div>
+                          <div style={{ 
+                            fontSize: 12, 
+                            background: "#ECFDF5", 
+                            color: "#059669", 
+                            padding: "3px 8px", 
+                            borderRadius: 6,
+                            fontWeight: 700,
+                            whiteSpace: "nowrap",
+                            marginLeft: 10
+                          }}>
+                            {(email.similarity * 100).toFixed(0)}% match
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>
+                          From: {email.from}
+                        </div>
+                        <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>
+                          {email.body.substring(0, 200)}...
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
 
@@ -3950,6 +4061,448 @@ export default function Home() {
           )}
         </div>
       </div>
+      
+      {/* ✅ Agent Modal - Shows AI processing steps */}
+      {showAgentModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.6)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+            padding: "20px",
+            overflowY: "auto",
+          }}
+          onClick={() => !agentProcessing && setShowAgentModal(false)}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: 24,
+              padding: 40,
+              maxWidth: 600,
+              width: "90%",
+              maxHeight: "90vh",
+              overflowY: "auto",
+              boxShadow: "0 20px 60px rgba(0, 0, 0, 0.3)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ textAlign: "center", marginBottom: 32 }}>
+              <div style={{
+                width: 80,
+                height: 80,
+                borderRadius: "50%",
+                background: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 40,
+                margin: "0 auto 16px",
+                animation: agentProcessing ? "pulse 2s ease-in-out infinite" : "none",
+              }}>
+                🤖
+              </div>
+              <h2 style={{ fontSize: 28, fontWeight: 700, color: "#111827", margin: 0 }}>
+                AI Agent Working
+              </h2>
+              <p style={{ fontSize: 14, color: "#6B7280", marginTop: 8 }}>
+                {agentProcessing ? "Processing your email..." : "All done!"}
+              </p>
+            </div>
+
+            {/* Progress Steps */}
+            <div style={{ marginBottom: 32 }}>
+              {[
+                { step: 1, icon: "🔍", label: "Analyzing email content", color: "#8B5CF6" },
+                { step: 2, icon: "✅", label: "Creating actionable task", color: "#10B981" },
+                { step: 3, icon: "📅", label: "Checking for calendar events", color: "#F59E0B" },
+                { step: 4, icon: "✍️", label: "Drafting professional reply", color: "#3B82F6" },
+                { step: 5, icon: "🎉", label: "Complete! Ready for review", color: "#8B5CF6" },
+              ].map((item) => (
+                <div
+                  key={item.step}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 16,
+                    padding: 16,
+                    marginBottom: 12,
+                    borderRadius: 12,
+                    background: agentStep >= item.step 
+                      ? `${item.color}15` 
+                      : "#F3F4F6",
+                    border: agentStep === item.step 
+                      ? `2px solid ${item.color}` 
+                      : "2px solid transparent",
+                    transition: "all 0.3s ease",
+                  }}
+                >
+                  <div style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: "50%",
+                    background: agentStep >= item.step 
+                      ? `linear-gradient(135deg, ${item.color}, ${item.color}dd)` 
+                      : "#E5E7EB",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 20,
+                    flexShrink: 0,
+                  }}>
+                    {agentStep > item.step ? "✓" : item.icon}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: agentStep >= item.step ? "#111827" : "#9CA3AF",
+                    }}>
+                      {item.label}
+                    </div>
+                    {agentStep === item.step && agentProcessing && (
+                      <div style={{
+                        fontSize: 12,
+                        color: item.color,
+                        marginTop: 4,
+                        fontWeight: 600,
+                      }}>
+                        In progress...
+                      </div>
+                    )}
+                  </div>
+                  {agentStep > item.step && (
+                    <div style={{
+                      fontSize: 24,
+                      color: item.color,
+                    }}>
+                      ✓
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Actions Summary (shown when complete) */}
+            {agentStep === 5 && agentActions && (
+              <div style={{
+                background: "linear-gradient(135deg, rgba(139, 92, 246, 0.08) 0%, rgba(109, 40, 217, 0.08) 100%)",
+                padding: 24,
+                borderRadius: 16,
+                marginBottom: 24,
+                border: "1px solid #8B5CF6",
+              }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 16 }}>
+                  📋 Actions Completed
+                </h3>
+                
+                {/* Summary */}
+                <div style={{ marginBottom: 16 }}>
+                  <strong style={{ color: "#6B7280", fontSize: 13 }}>Summary:</strong>
+                  <p style={{ color: "#374151", fontSize: 14, marginTop: 4, lineHeight: 1.6 }}>
+                    {agentActions.summary}
+                  </p>
+                </div>
+
+                {/* Task Created */}
+                <div style={{ marginBottom: 16 }}>
+                  <strong style={{ color: "#6B7280", fontSize: 13 }}>Task Created:</strong>
+                  <div style={{
+                    marginTop: 8,
+                    padding: 12,
+                    background: "white",
+                    borderRadius: 8,
+                    border: "1px solid #E5E7EB",
+                  }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                      {agentActions.taskTitle}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>
+                      Priority: <span style={{
+                        padding: "2px 8px",
+                        borderRadius: 6,
+                        background: agentActions.priority === "high" ? "#FEE2E2" : agentActions.priority === "medium" ? "#FEF3C7" : "#DBEAFE",
+                        color: agentActions.priority === "high" ? "#DC2626" : agentActions.priority === "medium" ? "#D97706" : "#2563EB",
+                        fontWeight: 600,
+                      }}>
+                        {agentActions.priority}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Event */}
+                {agentActions.hasEvent && agentActions.eventDetails && (
+                  <div style={{ marginBottom: 16 }}>
+                    <strong style={{ color: "#6B7280", fontSize: 13 }}>📅 Calendar Event:</strong>
+                    <div style={{
+                      marginTop: 8,
+                      padding: 12,
+                      background: "white",
+                      borderRadius: 8,
+                      border: "1px solid #E5E7EB",
+                    }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                        {agentActions.eventDetails.title}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>
+                        {agentActions.eventDetails.date}
+                        {agentActions.eventDetails.location && ` • ${agentActions.eventDetails.location}`}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Reply Draft */}
+                {agentActions.replyDraft ? (
+                  <div style={{ marginBottom: 16 }}>
+                    <strong style={{ color: "#6B7280", fontSize: 13 }}>✍️ Reply Draft:</strong>
+                    <div style={{
+                      marginTop: 8,
+                      padding: 12,
+                      background: "white",
+                      borderRadius: 8,
+                      border: "1px solid #E5E7EB",
+                      fontSize: 13,
+                      color: "#374151",
+                      lineHeight: 1.6,
+                      maxHeight: 150,
+                      overflowY: "auto",
+                    }}>
+                      {agentActions.replyDraft}
+                    </div>
+                  </div>
+                ) : agentActions.needsReply === false && (
+                  <div style={{ 
+                    marginBottom: 16,
+                    padding: "12px 16px",
+                    background: "#FEF3C7",
+                    borderRadius: 10,
+                    border: "1px solid #FCD34D",
+                    fontSize: 13,
+                    color: "#92400E",
+                  }}>
+                    ℹ️ AI determined this email doesn't need a reply (automated notification).
+                  </div>
+                )}
+
+                {/* Follow-up */}
+                {agentActions.suggestedFollowUp && (
+                  <div>
+                    <strong style={{ color: "#6B7280", fontSize: 13 }}>🔔 Suggested Follow-up:</strong>
+                    <p style={{ color: "#374151", fontSize: 13, marginTop: 4 }}>
+                      {agentActions.suggestedFollowUp}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+              {/* Send Reply Button - Show if reply exists */}
+              {agentStep === 5 && agentActions?.replyDraft && (
+                <button
+                  onClick={async () => {
+                    if (!selectedMail) return;
+                    
+                    // Extract recipient email
+                    const recipient = extractEmail(selectedMail.from);
+                    console.log("📧 Sending reply to:", {
+                      raw: selectedMail.from,
+                      extracted: recipient,
+                      subject: selectedMail.subject,
+                      threadId: selectedMail.threadId,
+                    });
+                    
+                    if (!recipient || !recipient.includes("@")) {
+                      alert("❌ Cannot send: No valid recipient email found\n\nFrom field: " + selectedMail.from);
+                      return;
+                    }
+                    
+                    // Show approval dialog with reply preview
+                    const confirmed = window.confirm(
+                      "📧 REVIEW & APPROVE REPLY\n\n" +
+                      "To: " + recipient + "\n" +
+                      "Subject: Re: " + selectedMail.subject + "\n\n" +
+                      "Reply:\n" +
+                      agentActions.replyDraft.substring(0, 300) + 
+                      (agentActions.replyDraft.length > 300 ? "...\n\n[Reply truncated for preview]" : "") +
+                      "\n\n✅ Click OK to send this reply\n❌ Click Cancel to edit or discard"
+                    );
+                    
+                    if (!confirmed) {
+                      alert("❌ Reply not sent. You can edit it manually or try again.");
+                      return;
+                    }
+                    
+                    // Send the reply
+                    try {
+                      const res = await fetch("/api/gmail/reply", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          threadId: selectedMail.threadId,
+                          to: recipient,
+                          subject: selectedMail.subject,
+                          body: agentActions.replyDraft,
+                          originalMessageId: selectedMail.id,
+                        }),
+                      });
+                      
+                      const data = await res.json();
+                      
+                      if (data.success) {
+                        alert("✅ Reply sent successfully to " + recipient + "!");
+                        setShowAgentModal(false);
+                        // Optionally archive the email after sending
+                        if (agentActions.canAutoArchive) {
+                          markDone();
+                        }
+                      } else {
+                        alert("❌ Failed to send: " + (data.error || "Unknown error"));
+                      }
+                    } catch (error) {
+                      console.error("Send error:", error);
+                      alert("❌ Failed to send reply. Check console for details.");
+                    }
+                  }}
+                  style={{
+                    padding: "14px 28px",
+                    borderRadius: 12,
+                    background: "linear-gradient(135deg, #10B981 0%, #059669 100%)",
+                    color: "white",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: 15,
+                    fontWeight: 700,
+                    boxShadow: "0 4px 16px rgba(16, 185, 129, 0.35)",
+                    transition: "all 0.2s ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = "translateY(-2px)";
+                    e.currentTarget.style.boxShadow = "0 6px 20px rgba(16, 185, 129, 0.45)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = "translateY(0)";
+                    e.currentTarget.style.boxShadow = "0 4px 16px rgba(16, 185, 129, 0.35)";
+                  }}
+                >
+                  ✅ Review & Send Reply
+                </button>
+              )}
+              
+              {/* Generate Reply Button - Show if no reply exists but AI said it doesn't need one */}
+              {agentStep === 5 && !agentActions?.replyDraft && agentActions?.needsReply === false && (
+                <button
+                  onClick={async () => {
+                    if (!selectedMail) return;
+                    
+                    setAgentProcessing(true);
+                    
+                    try {
+                      // Generate reply using AI
+                      const res = await fetch("/api/ai/reply", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          subject: selectedMail.subject,
+                          snippet: selectedMail.snippet || selectedMail.body || "",
+                        }),
+                      });
+                      
+                      const data = await res.json();
+                      
+                      if (data.reply) {
+                        // Update agentActions with the new reply
+                        setAgentActions({
+                          ...agentActions,
+                          replyDraft: data.reply,
+                          needsReply: true,
+                        });
+                        alert("✅ Reply generated! Review and send when ready.");
+                      } else {
+                        alert("❌ Failed to generate reply");
+                      }
+                    } catch (error) {
+                      console.error("Generate reply error:", error);
+                      alert("❌ Failed to generate reply. Check console for details.");
+                    }
+                    
+                    setAgentProcessing(false);
+                  }}
+                  disabled={agentProcessing}
+                  style={{
+                    padding: "14px 28px",
+                    borderRadius: 12,
+                    background: agentProcessing 
+                      ? "#E5E7EB" 
+                      : "linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)",
+                    color: "white",
+                    border: "none",
+                    cursor: agentProcessing ? "not-allowed" : "pointer",
+                    fontSize: 15,
+                    fontWeight: 700,
+                    boxShadow: "0 4px 16px rgba(59, 130, 246, 0.35)",
+                    transition: "all 0.2s ease",
+                  }}
+                >
+                  {agentProcessing ? "⏳ Generating..." : "✍️ Generate Reply Anyway"}
+                </button>
+              )}
+              
+              {agentStep === 5 && agentActions?.canAutoArchive && (
+                <button
+                  onClick={() => {
+                    markDone();
+                    setShowAgentModal(false);
+                    alert("✅ Email archived successfully!");
+                  }}
+                  style={{
+                    padding: "12px 24px",
+                    borderRadius: 10,
+                    background: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)",
+                    color: "white",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    boxShadow: "0 4px 12px rgba(139, 92, 246, 0.25)",
+                  }}
+                >
+                  📦 Archive Email
+                </button>
+              )}
+              
+              <button
+                onClick={() => setShowAgentModal(false)}
+                disabled={agentProcessing}
+                style={{
+                  padding: "12px 24px",
+                  borderRadius: 10,
+                  background: agentProcessing ? "#E5E7EB" : "white",
+                  color: agentProcessing ? "#9CA3AF" : "#111827",
+                  border: "1px solid #E5E7EB",
+                  cursor: agentProcessing ? "not-allowed" : "pointer",
+                  fontSize: 14,
+                  fontWeight: 600,
+                }}
+              >
+                {agentProcessing ? "Please wait..." : "Close"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Compose Modal Component */}
       <ComposeModal

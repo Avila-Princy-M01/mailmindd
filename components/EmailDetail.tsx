@@ -46,6 +46,11 @@ export default function EmailDetail({
     message: string;
     type: "error" | "success" | "info" | "warning";
   } | null>(null);
+  
+  // RAG: Similar emails feature
+  const [similarEmails, setSimilarEmails] = useState<any[]>([]);
+  const [loadingSimilar, setLoadingSimilar] = useState(false);
+  const [showSimilar, setShowSimilar] = useState(false);
 
   if (!selectedMail) {
     return (
@@ -79,6 +84,7 @@ export default function EmailDetail({
         body: JSON.stringify({
           subject: selectedMail.subject,
           snippet: selectedMail.snippet || selectedMail.body || "",
+          useRAG: true, // Enable RAG for context-aware replies
         }),
       });
 
@@ -96,7 +102,9 @@ export default function EmailDetail({
       setAiReply(data.reply);
       setEditableReply(data.reply);
       setToast({
-        message: "Reply generated successfully!",
+        message: data.ragUsed 
+          ? `Reply generated with context from ${data.similarEmailsCount} similar emails! (RAG-Powered)` 
+          : "Reply generated successfully!",
         type: "success",
       });
     } catch (error) {
@@ -163,6 +171,47 @@ export default function EmailDetail({
       type: "success",
     });
     setTimeout(() => setCopied(false), 2000);
+  };
+  
+  // RAG: Find similar emails
+  const findSimilarEmails = async () => {
+    setLoadingSimilar(true);
+    setSimilarEmails([]);
+    
+    try {
+      const res = await fetch("/api/rag/similar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          queryText: `${selectedMail.subject} ${selectedMail.snippet || selectedMail.body || ""}`,
+          topK: 5,
+          excludeEmailId: selectedMail.id,
+        }),
+      });
+      
+      const data = await res.json();
+      
+      if (data.similarEmails && data.similarEmails.length > 0) {
+        setSimilarEmails(data.similarEmails);
+        setShowSimilar(true);
+        setToast({
+          message: `Found ${data.similarEmails.length} similar emails using RAG!`,
+          type: "success",
+        });
+      } else {
+        setToast({
+          message: "No similar emails found",
+          type: "info",
+        });
+      }
+    } catch (error) {
+      setToast({
+        message: "Failed to find similar emails",
+        type: "error",
+      });
+    }
+    
+    setLoadingSimilar(false);
   };
 
   const senderEmail = extractEmail(selectedMail.from);
@@ -299,6 +348,23 @@ export default function EmailDetail({
             }}
           >
             🗑 Delete
+          </button>
+          
+          <button
+            onClick={findSimilarEmails}
+            disabled={loadingSimilar}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 10,
+              border: "1px solid #10B981",
+              background: loadingSimilar ? "#F3F4F6" : "linear-gradient(135deg, #10B981, #059669)",
+              color: loadingSimilar ? "#6B7280" : "white",
+              cursor: loadingSimilar ? "not-allowed" : "pointer",
+              fontWeight: 700,
+              fontSize: 13,
+            }}
+          >
+            {loadingSimilar ? "🔍 Searching..." : "🔍 Find Similar (RAG)"}
           </button>
         </div>
       </div>
@@ -496,6 +562,88 @@ export default function EmailDetail({
                 {copied ? "✅ Copied!" : "📋 Copy"}
               </button>
             </div>
+          </div>
+        )}
+        
+        {/* RAG: Similar Emails */}
+        {showSimilar && similarEmails.length > 0 && (
+          <div
+            style={{
+              background: "#F0FDF4",
+              padding: 16,
+              borderRadius: 12,
+              border: "2px solid #10B981",
+              marginTop: 16,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h4 style={{ fontWeight: 700, color: "#065F46", display: "flex", alignItems: "center", gap: 8 }}>
+                🔍 Similar Emails Found (RAG-Powered Context Search)
+                <span style={{ 
+                  fontSize: 11, 
+                  background: "#10B981", 
+                  color: "white", 
+                  padding: "2px 8px", 
+                  borderRadius: 6,
+                  fontWeight: 700
+                }}>
+                  {similarEmails.length} MATCHES
+                </span>
+              </h4>
+              <button
+                onClick={() => setShowSimilar(false)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  fontSize: 20,
+                  cursor: "pointer",
+                  color: "#6B7280",
+                }}
+              >
+                ×
+              </button>
+            </div>
+            
+            <div style={{ fontSize: 12, color: "#059669", marginBottom: 12, fontWeight: 600 }}>
+              These emails have similar content based on semantic similarity analysis
+            </div>
+            
+            {similarEmails.map((email, index) => (
+              <div
+                key={index}
+                style={{
+                  background: "white",
+                  padding: 12,
+                  borderRadius: 10,
+                  marginBottom: 8,
+                  border: "1px solid #D1FAE5",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 6 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "#111827", flex: 1 }}>
+                    {email.subject}
+                  </div>
+                  <div style={{ 
+                    fontSize: 11, 
+                    background: "#ECFDF5", 
+                    color: "#059669", 
+                    padding: "2px 6px", 
+                    borderRadius: 4,
+                    fontWeight: 600,
+                    whiteSpace: "nowrap",
+                    marginLeft: 8
+                  }}>
+                    {(email.similarity * 100).toFixed(0)}% match
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 4 }}>
+                  From: {email.from}
+                </div>
+                <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.5 }}>
+                  {email.body.substring(0, 150)}...
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

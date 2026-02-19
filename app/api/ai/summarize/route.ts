@@ -1,39 +1,33 @@
 import { NextResponse } from "next/server";
-
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const MODEL = "llama-3.3-70b-versatile";
-
-if (!GROQ_API_KEY) {
-  console.error("❌ GROQ_API_KEY is not configured");
-}
+import { callOpenRouter } from "@/lib/ai-utils";
+import { findSimilarEmails, buildRAGContext } from "@/utils/ragHelpers";
 
 export async function POST(req: Request) {
-  if (!GROQ_API_KEY) {
-    return NextResponse.json({
-      summary: "Unable to generate summary. API key not configured.",
-    }, { status: 500 });
-  }
-
   try {
-    const { subject, snippet, from, date } = await req.json();
+    const { subject, snippet, from, date, useRAG = true } = await req.json();
 
     // ✅ Trim input to avoid token overload
     const safeSnippet = (snippet || "").slice(0, 2000);
 
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${GROQ_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 500,
-        messages: [
-          {
-            role: "user",
-            content: `
-You are an email assistant.
+    // RAG: Find similar past emails for context (filtered by sender)
+    let ragContext = "";
+    let similarEmailsCount = 0;
+    if (useRAG) {
+      const senderEmail = from ? from.match(/<(.+?)>|([^\s<>]+@[^\s<>]+)/)?.[1] || from : undefined;
+      const similarEmails = await findSimilarEmails(`${subject} ${safeSnippet}`, 3, undefined, senderEmail);
+      if (similarEmails.length > 0) {
+        ragContext = buildRAGContext(similarEmails);
+        similarEmailsCount = similarEmails.length;
+      }
+    }
+
+    const response = await callOpenRouter([
+      {
+        role: "user",
+        content: `
+You are an email assistant with access to past email context.
+
+${ragContext}
 
 Summarize this email clearly in this format:
 
@@ -41,6 +35,7 @@ Summarize this email clearly in this format:
 📅 Received Date: ...
 ⏳ Deadline: (if mentioned)
 📌 Summary: (2-3 lines)
+${similarEmailsCount > 0 ? '🔍 Context: Based on ' + similarEmailsCount + ' previous emails from this sender' : ''}
 
 Email:
 
@@ -51,25 +46,28 @@ Received: ${date}
 Body:
 ${safeSnippet}
           `,
-          },
-        ],
-      }),
+      },
+    ], {
+      temperature: 0.3,
+      maxTokens: 500,
     });
 
-    const data = await response.json();
+    const summary = response.choices[0].message.content;
 
     return NextResponse.json({
-      summary: data.choices[0]?.message?.content || "Unable to generate summary",
+      summary,
+      ragUsed: useRAG && ragContext.length > 0,
+      similarEmailsCount,
     });
   } catch (error: any) {
     console.error("SUMMARY ERROR:", error);
 
     // ✅ Handle Rate Limit
-    if (error?.status === 429) {
+    if (error?.message?.includes("rate limit") || error?.message?.includes("429")) {
       return NextResponse.json(
         {
           summary:
-            "⚠️ Rate limit reached. Please wait 1 minute and try again.",
+            "⚠️ API rate limit reached. Please wait 1 minute and try again.",
         },
         { status: 429 }
       );
