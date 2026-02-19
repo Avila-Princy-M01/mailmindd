@@ -1,14 +1,21 @@
 import { NextResponse } from "next/server";
 import { findSimilarEmails, buildRAGContext } from "@/utils/ragHelpers";
 
-// OpenRouter configuration for Qwen 2.5 Coder 32B Instruct
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!;
-const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const MODEL = "qwen/qwen-2.5-coder-32b-instruct";
+// Groq configuration
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+const MODEL = "llama-3.3-70b-versatile";
 
 export async function POST(req: Request) {
+  if (!GROQ_API_KEY) {
+    return NextResponse.json({
+      success: false,
+      error: "API key not configured",
+    }, { status: 500 });
+  }
+
   try {
-    const { subject, snippet, body, from, date, useRAG = true } = await req.json();
+    const { subject, snippet, body, from, date, useRAG = false } = await req.json();
 
     // Combine email content
     const emailContent = `
@@ -22,24 +29,28 @@ Body: ${snippet || body || ""}
     let ragContext = "";
     let similarEmailsCount = 0;
     if (useRAG) {
-      const similarEmails = await findSimilarEmails(`${subject} ${snippet || body}`, 3);
-      if (similarEmails.length > 0) {
-        ragContext = buildRAGContext(similarEmails);
-        similarEmailsCount = similarEmails.length;
+      try {
+        const similarEmails = await findSimilarEmails(`${subject} ${snippet || body}`, 3);
+        if (similarEmails.length > 0) {
+          ragContext = buildRAGContext(similarEmails);
+          similarEmailsCount = similarEmails.length;
+        }
+      } catch (ragError) {
+        console.error("RAG error (non-fatal):", ragError);
       }
     }
 
     // Step 1: Analyze email and create action plan
-    const analysisResponse = await fetch(OPENROUTER_API_URL, {
+    const analysisResponse = await fetch(GROQ_API_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        "Authorization": `Bearer ${GROQ_API_KEY}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": process.env.NEXTAUTH_URL || "http://localhost:3000",
-        "X-Title": "MailMind",
       },
       body: JSON.stringify({
         model: MODEL,
+        temperature: 0.2,
+        max_tokens: 600,
         messages: [
           {
             role: "system",
@@ -76,14 +87,12 @@ CRITICAL RULES:
             content: emailContent,
           },
         ],
-        temperature: 0.2,
-        max_tokens: 600,
       }),
     });
 
     if (!analysisResponse.ok) {
       const errorData = await analysisResponse.json();
-      throw new Error(errorData.error?.message || "OpenRouter API request failed");
+      throw new Error(errorData.error?.message || "Groq API request failed");
     }
 
     const analysisData = await analysisResponse.json();
@@ -139,16 +148,16 @@ CRITICAL RULES:
     let finalReply = analysis.replyDraft;
     if (analysis.needsReply && (!finalReply || finalReply === "null" || finalReply.trim() === "")) {
       try {
-        const replyResponse = await fetch(OPENROUTER_API_URL, {
+        const replyResponse = await fetch(GROQ_API_URL, {
           method: "POST",
           headers: {
-            "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+            "Authorization": `Bearer ${GROQ_API_KEY}`,
             "Content-Type": "application/json",
-            "HTTP-Referer": process.env.NEXTAUTH_URL || "http://localhost:3000",
-            "X-Title": "MailMind",
           },
           body: JSON.stringify({
             model: MODEL,
+            temperature: 0.4,
+            max_tokens: 300,
             messages: [
               {
                 role: "system",
@@ -159,8 +168,6 @@ CRITICAL RULES:
                 content: `Write a professional reply to this email:\n\n${emailContent}`,
               },
             ],
-            temperature: 0.4,
-            max_tokens: 300,
           }),
         });
         

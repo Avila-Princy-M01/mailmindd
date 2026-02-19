@@ -1,10 +1,22 @@
 import { NextResponse } from "next/server";
-import { callOpenRouter } from "@/lib/ai-utils";
 import { findSimilarEmails, buildRAGContext } from "@/utils/ragHelpers";
 
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const MODEL = "llama-3.3-70b-versatile";
+
+if (!GROQ_API_KEY) {
+  console.error("❌ GROQ_API_KEY is not configured");
+}
+
 export async function POST(req: Request) {
+  if (!GROQ_API_KEY) {
+    return NextResponse.json({
+      summary: "Unable to generate summary. API key not configured.",
+    }, { status: 500 });
+  }
+
   try {
-    const { subject, snippet, from, date, useRAG = true } = await req.json();
+    const { subject, snippet, from, date, useRAG = false } = await req.json();
 
     // ✅ Trim input to avoid token overload
     const safeSnippet = (snippet || "").slice(0, 2000);
@@ -13,19 +25,33 @@ export async function POST(req: Request) {
     let ragContext = "";
     let similarEmailsCount = 0;
     if (useRAG) {
-      const senderEmail = from ? from.match(/<(.+?)>|([^\s<>]+@[^\s<>]+)/)?.[1] || from : undefined;
-      const similarEmails = await findSimilarEmails(`${subject} ${safeSnippet}`, 3, undefined, senderEmail);
-      if (similarEmails.length > 0) {
-        ragContext = buildRAGContext(similarEmails);
-        similarEmailsCount = similarEmails.length;
+      try {
+        const senderEmail = from ? from.match(/<(.+?)>|([^\s<>]+@[^\s<>]+)/)?.[1] || from : undefined;
+        const similarEmails = await findSimilarEmails(`${subject} ${safeSnippet}`, 3, undefined, senderEmail);
+        if (similarEmails.length > 0) {
+          ragContext = buildRAGContext(similarEmails);
+          similarEmailsCount = similarEmails.length;
+        }
+      } catch (ragError) {
+        console.error("RAG error (non-fatal):", ragError);
+        // Continue without RAG if it fails
       }
     }
 
-    const response = await callOpenRouter([
-      {
-        role: "user",
-        content: `
-You are an email assistant with access to past email context.
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${GROQ_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 500,
+        messages: [
+          {
+            role: "user",
+            content: `
+You are an email assistant${ragContext ? " with access to past email context" : ""}.
 
 ${ragContext}
 
@@ -46,16 +72,15 @@ Received: ${date}
 Body:
 ${safeSnippet}
           `,
-      },
-    ], {
-      temperature: 0.3,
-      maxTokens: 500,
+          },
+        ],
+      }),
     });
 
-    const summary = response.choices[0].message.content;
+    const data = await response.json();
 
     return NextResponse.json({
-      summary,
+      summary: data.choices[0]?.message?.content || "Unable to generate summary",
       ragUsed: useRAG && ragContext.length > 0,
       similarEmailsCount,
     });
@@ -63,11 +88,10 @@ ${safeSnippet}
     console.error("SUMMARY ERROR:", error);
 
     // ✅ Handle Rate Limit
-    if (error?.message?.includes("rate limit") || error?.message?.includes("429")) {
+    if (error?.status === 429) {
       return NextResponse.json(
         {
-          summary:
-            "⚠️ API rate limit reached. Please wait 1 minute and try again.",
+          summary: "⚠️ Rate limit reached. Please wait 1 minute and try again.",
         },
         { status: 429 }
       );
